@@ -17,6 +17,7 @@ add_library(winlator SHARED
         xr/renderer.c
         winlator/drawable.c
         winlator/gpu_image.c
+        winlator/ahb_bridge.c
         winlator/sysvshared_memory.c
         winlator/xconnector_epoll.c
         winlator/alsa_client.c
@@ -35,6 +36,7 @@ target_link_libraries(winlator
         GLESv2
         GLESv3
         adrenotools
+        sync
 )
 
 add_library(fakeinput SHARED
