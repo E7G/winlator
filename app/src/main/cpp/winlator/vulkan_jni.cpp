@@ -159,10 +159,25 @@ Java_com_winlator_cmod_renderer_VulkanRenderer_nativeDestroyScanout(JNIEnv*, job
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_renderer_VulkanRenderer_nativeScanoutSetBuffer(
-    JNIEnv*, jobject, jlong handle, jlong ahbPtr, jint x, jint y, jint w, jint h)
+    JNIEnv*, jobject, jlong handle, jlong ahbPtr, jint acquireFenceFd, jint x, jint y, jint w, jint h)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r && ahbPtr) r->scanoutSetBuffer(reinterpret_cast<AHardwareBuffer*>(ahbPtr), x, y, w, h);
+    if (r && ahbPtr) r->scanoutSetBuffer(reinterpret_cast<AHardwareBuffer*>(ahbPtr), (int)acquireFenceFd, x, y, w, h);
+}
+
+extern "C" JNIEXPORT jintArray JNICALL
+Java_com_winlator_cmod_renderer_VulkanRenderer_nativePollReleaseFence(
+    JNIEnv* env, jobject, jlong handle)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r) return nullptr;
+    auto [slotIndex, releaseFd] = r->pollReleaseFence();
+    if (slotIndex < 0) return nullptr;
+    jintArray result = env->NewIntArray(2);
+    if (!result) return nullptr;
+    jint buf[2] = { (jint)slotIndex, (jint)releaseFd };
+    env->SetIntArrayRegion(result, 0, 2, buf);
+    return result;
 }
 
 extern "C" JNIEXPORT void JNICALL

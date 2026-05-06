@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <unistd.h>
 #include <dlfcn.h>
 #include "window_vert.h"
 #include "window_frag.h"
@@ -1170,6 +1171,7 @@ typedef void  (*pfn_STSetZOrder)(void*, void*, int32_t);
 typedef void  (*pfn_STSetVisibility)(void*, void*, int8_t);
 typedef void  (*pfn_STSetGeometry)(void*, void*, const ARect*, const ARect*, int32_t);
 typedef void  (*pfn_STSetBackPressure)(void*, void*, bool);
+typedef void  (*pfn_STSetOnComplete)(void*, void*, void (*)(void*, void*));
 
 bool VulkanRendererContext::loadScanoutApi() {
     if (scanoutApiLoaded) return fnSCCreateFromWin != nullptr;
@@ -1191,6 +1193,7 @@ bool VulkanRendererContext::loadScanoutApi() {
     fnSTSetVisibility = dlsym(lib, "ASurfaceTransaction_setVisibility");
     fnSTSetGeometry      = dlsym(lib, "ASurfaceTransaction_setGeometry");
     fnSTSetBackPressure  = dlsym(lib, "ASurfaceTransaction_setEnableBackPressure");
+    fnSTSetOnComplete    = dlsym(lib, "ASurfaceTransaction_setOnComplete");
 
     bool coreOk = fnSCCreateFromWin && fnSCRelease &&
                   fnSTCreate && fnSTDelete && fnSTApply &&
@@ -1316,10 +1319,11 @@ void VulkanRendererContext::destroyScanout() {
     scanoutCursorBufW = scanoutCursorBufH = 0;
 }
 
-void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int x, int y, int w, int h) {
+void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFenceFd, int x, int y, int w, int h) {
     if (!scanoutActive.load() || !scanoutGameSC || !ahb) {
         RLOG("scanoutSetBuffer: SKIPPED active=%d sc=%p ahb=%p",
             (int)scanoutActive.load(),scanoutGameSC,(void*)ahb);
+        if (acquireFenceFd >= 0) close(acquireFenceFd);
         return;
     }
     static int _scanoutBufCnt=0;
@@ -1337,7 +1341,10 @@ void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int x, int y,
       if (scanoutPendingDirty.load() && scanoutPending.ahb && scanoutPending.ahb != ahb) {
           AHardwareBuffer_release(scanoutPending.ahb);
       }
-      scanoutPending = {ahb, x, y, w, h};
+      if (scanoutPendingDirty.load() && scanoutPending.acquireFenceFd >= 0) {
+          close(scanoutPending.acquireFenceFd);
+      }
+      scanoutPending = {ahb, acquireFenceFd, -1, x, y, w, h};
       scanoutPendingDirty.store(true, std::memory_order_release); }
     needsRender.store(true, std::memory_order_release);
     dirtyCV.notify_one();
@@ -1498,9 +1505,14 @@ void VulkanRendererContext::applyScanoutBuffer() {
     { std::lock_guard<std::mutex> lk(scanoutMutex);
       if (!scanoutPendingDirty.load()) return;
       p = scanoutPending;
+      scanoutPending.acquireFenceFd = -1; // ownership transferred to p
       scanoutPendingDirty.store(false, std::memory_order_relaxed); }
     AHardwareBuffer* ahb=p.ahb; int w=p.w, h=p.h; (void)p.x; (void)p.y;
-    if (!ahb || !scanoutGameSC) return;
+    int acquireFd = p.acquireFenceFd;
+    if (!ahb || !scanoutGameSC) {
+        if (acquireFd >= 0) close(acquireFd);
+        return;
+    }
 
     int32_t cw = containerWidth  > 0 ? containerWidth  : w;
     int32_t ch = containerHeight > 0 ? containerHeight : h;
@@ -1573,11 +1585,41 @@ void VulkanRendererContext::applyScanoutBuffer() {
     }
 
     void* t=ST_CREATE();
-    ST_SETBUF(t,scanoutGameSC,presentAhb,-1);
+    ST_SETBUF(t,scanoutGameSC,presentAhb,acquireFd);
     ST_SETGEO(t,scanoutGameSC,&src,&dst,0);
     ST_SETVIS(t,scanoutGameSC,1);
     ST_SETBP(t,scanoutGameSC,false);
+
+    // Register onComplete callback for release fence if available
+    if (fnSTSetOnComplete) {
+        struct OnCompleteCtx {
+            VulkanRendererContext* self;
+            int slotIndex;
+        };
+        auto* ctx = new OnCompleteCtx{this, p.slotIndex};
+        ((pfn_STSetOnComplete)fnSTSetOnComplete)(t, (void*)ctx,
+            [](void* context, void* stats) {
+                auto* c = reinterpret_cast<OnCompleteCtx*>(context);
+                // Get the previous release fence fd from stats
+                // ASurfaceTransactionStats_getPreviousReleaseFenceFd is API 29
+                typedef int (*pfn_GetReleaseFence)(void*, void*);
+                // We load this dynamically; for now use -1 if unavailable
+                int releaseFd = -1;
+                void* lib = dlopen("libandroid.so", RTLD_NOW | RTLD_NOLOAD);
+                if (lib) {
+                    auto fn = (pfn_GetReleaseFence)dlsym(lib, "ASurfaceTransactionStats_getPreviousReleaseFenceFd");
+                    if (fn && c->self->scanoutGameSC) {
+                        releaseFd = fn(stats, c->self->scanoutGameSC);
+                    }
+                }
+                { std::lock_guard<std::mutex> lk(c->self->releaseMutex);
+                  c->self->releaseQueue.push_back({c->slotIndex, releaseFd}); }
+                delete c;
+            });
+    }
+
     ST_APPLY(t);
+    directFrameCount.fetch_add(1, std::memory_order_relaxed);
     gameFrameDelivered.store(true);
     ST_DELETE(t);
     AHardwareBuffer_release(ahb);
@@ -1585,6 +1627,14 @@ void VulkanRendererContext::applyScanoutBuffer() {
 
 void VulkanRendererContext::scanoutSetDst(int x, int y, int w, int h) {
     scanoutDstX=x; scanoutDstY=y; scanoutDstW=w; scanoutDstH=h;
+}
+
+std::pair<int,int> VulkanRendererContext::pollReleaseFence() {
+    std::lock_guard<std::mutex> lk(releaseMutex);
+    if (releaseQueue.empty()) return {-1, -1};
+    auto front = releaseQueue.front();
+    releaseQueue.erase(releaseQueue.begin());
+    return {front.slotIndex, front.releaseFd};
 }
 
 void VulkanRendererContext::scanoutSetCursorImage(void* pixels, short w, short h, short stride) {
@@ -1679,6 +1729,10 @@ void VulkanRendererContext::dumpRendererInfo() {
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
         "Scanout: active=%d gameFrameDelivered=%d scanoutGameSC=%p",
         (int)scanoutActive.load(),(int)gameFrameDelivered.load(),scanoutGameSC);
+    __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
+        "DirectCompositing: directFrameCount=%llu releaseQueueSize=%zu",
+        (unsigned long long)directFrameCount.load(),
+        [this]{ std::lock_guard<std::mutex> lk(releaseMutex); return releaseQueue.size(); }());
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
         "Surface: %dx%d container: %dx%d",
         surfaceWidth,surfaceHeight,containerWidth,containerHeight);

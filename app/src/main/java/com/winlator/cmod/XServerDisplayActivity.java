@@ -91,6 +91,7 @@ import com.winlator.cmod.xconnector.UnixSocketConfig;
 import com.winlator.cmod.xenvironment.ImageFs;
 import com.winlator.cmod.xenvironment.XEnvironment;
 import com.winlator.cmod.xenvironment.components.ALSAServerComponent;
+import com.winlator.cmod.xenvironment.components.DirectCompositorComponent;
 import com.winlator.cmod.xenvironment.components.GuestProgramLauncherComponent;
 import com.winlator.cmod.xenvironment.components.PulseAudioComponent;
 import com.winlator.cmod.xenvironment.components.SysVSharedMemoryComponent;
@@ -787,6 +788,9 @@ if (enableLogs) {
 
         environment = new XEnvironment(this, imageFs);
         environment.addComponent(new SysVSharedMemoryComponent(xServer, UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.SYSVSHM_SERVER_PATH)));
+        environment.addComponent(new DirectCompositorComponent(
+                xServerView.getRenderer(), 3,
+                xServer.screenInfo.width, xServer.screenInfo.height));
         environment.addComponent(new XServerComponent(xServer, UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.XSERVER_PATH)));
 
         if (audioDriver.equals("alsa")) {

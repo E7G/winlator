@@ -9,6 +9,7 @@ import android.widget.Toast;
 import com.winlator.cmod.R;
 import com.winlator.cmod.widget.WinlatorHUD;
 import com.winlator.cmod.widget.XServerView;
+import com.winlator.cmod.xenvironment.components.DirectCompositorComponent;
 import com.winlator.cmod.xserver.Bitmask;
 import com.winlator.cmod.xserver.Cursor;
 import com.winlator.cmod.xserver.Drawable;
@@ -55,6 +56,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private Cursor lastCursor = null;
     private boolean xRenderingPausedForScanout = false;
 
+    private final java.util.concurrent.atomic.AtomicLong directFrameCount =
+        new java.util.concurrent.atomic.AtomicLong(0);
+
     private volatile ArrayList<RenderableWindow> renderableWindows = new ArrayList<>();
     private static final java.util.concurrent.atomic.AtomicLong ID_GEN =
         new java.util.concurrent.atomic.AtomicLong(1);
@@ -66,6 +70,8 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private android.view.SurfaceControl scanoutCursorSC;
     private android.view.Surface        scanoutGameSurface;
     private android.view.Surface        scanoutCursorSurface;
+    private volatile AHardwareBufferPool ahbPool = null;
+    private volatile DirectCompositorComponent directCompositorRef = null;
 
     public VulkanRenderer(XServerView xServerView, XServer xServer) {
         this.xServerView = xServerView;
@@ -104,7 +110,8 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeDetachSurface(long handle);
     private native boolean nativeReattachSurface(long handle, android.view.Surface surface);
     private native void nativeDestroyScanout(long handle);
-    private native void nativeScanoutSetBuffer(long handle, long ahbPtr, int x, int y, int w, int h);
+    private native void nativeScanoutSetBuffer(long handle, long ahbPtr, int acquireFenceFd, int x, int y, int w, int h);
+    private native int[] nativePollReleaseFence(long handle);
     private native void nativeScanoutSetCursorImage(long handle, java.nio.ByteBuffer pixels, short w, short h, short stride);
     private native void nativeScanoutSetCursorPos(long handle, short x, short y, short hotX, short hotY);
     private native boolean nativeIsScanoutActive(long handle);
@@ -148,9 +155,61 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     if (!ok) {
                         nativeDestroy(nativeHandle);
                         nativeHandle = 0;
+                        // Signal pool reinit if in nativeMode
+                        if (nativeMode) {
+                            DirectCompositorComponent dcc = directCompositorRef;
+                            if (dcc != null) {
+                                xServerView.post(() -> {
+                                    if (!dcc.reinitPool()) {
+                                        android.util.Log.e("VulkanRenderer",
+                                            "onSurfaceCreated: pool reinit failed after context loss");
+                                    }
+                                });
+                            }
+                        }
                     } else {
                         initComplete = true;
                         xServerView.queueEvent(this::updateScene);
+                        // Recreate SC layers if in nativeMode after successful reattach
+                        if (nativeMode) {
+                            xServerView.post(() -> {
+                                releaseScanoutSurfaces();
+                                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                                    try {
+                                        android.view.SurfaceControl xsc = xServerView.getSurfaceControl();
+                                        scanoutGameSC = new android.view.SurfaceControl.Builder()
+                                            .setParent(xsc).setName("winlator_game").setOpaque(true).build();
+                                        scanoutGameSurface = new android.view.Surface(scanoutGameSC);
+                                        scanoutCursorSC = new android.view.SurfaceControl.Builder()
+                                            .setParent(xsc).setName("winlator_cursor").setFormat(1).build();
+                                        scanoutCursorSurface = new android.view.Surface(scanoutCursorSC);
+                                        new android.view.SurfaceControl.Transaction()
+                                            .setLayer(scanoutGameSC,   1)
+                                            .setLayer(scanoutCursorSC, 2)
+                                            .setVisibility(scanoutGameSC,   true)
+                                            .setVisibility(scanoutCursorSC, true)
+                                            .apply();
+                                        applyScanoutFrameRateHint();
+                                        applyScanoutSwapTransform();
+                                        synchronized (lock) {
+                                            if (nativeHandle != 0) {
+                                                nativeSetScanoutWindow(nativeHandle, scanoutGameSurface, scanoutCursorSurface);
+                                                updateTransform();
+                                            }
+                                        }
+                                    } catch (Exception e) {
+                                        android.util.Log.w("VulkanRenderer", "SC recreate failed on reattach: " + e);
+                                        synchronized (lock) {
+                                            if (nativeHandle != 0) nativeInitScanout(nativeHandle);
+                                        }
+                                        DirectCompositorComponent dcc = directCompositorRef;
+                                        if (dcc != null) dcc.onScanoutFallback();
+                                    }
+                                } else {
+                                    synchronized (lock) { if (nativeHandle != 0) nativeInitScanout(nativeHandle); }
+                                }
+                            });
+                        }
                         return;
                     }
                 }
@@ -193,6 +252,8 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                                     synchronized (lock) {
                                         if (nativeHandle != 0) nativeInitScanout(nativeHandle);
                                     }
+                                    DirectCompositorComponent dcc = directCompositorRef;
+                                    if (dcc != null) dcc.onScanoutFallback();
                                 }
                             } else {
                                 synchronized (lock) { if (nativeHandle != 0) nativeInitScanout(nativeHandle); }
@@ -231,9 +292,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         synchronized (lock) {
             if (nativeHandle != 0) {
                 if (nativeMode) {
-                    nativeDestroyScanout(nativeHandle);
-                    nativeDestroy(nativeHandle);
-                    nativeHandle = 0;
+                    nativeDetachSurface(nativeHandle);
                 } else {
                     nativeDetachSurface(nativeHandle);
                 }
@@ -243,8 +302,21 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     }
 
     private void releaseScanoutSurfaces() {
+        // Step 1: Hide both layers atomically
+        if (android.os.Build.VERSION.SDK_INT >= 29 && (scanoutGameSC != null || scanoutCursorSC != null)) {
+            try {
+                android.view.SurfaceControl.Transaction txn = new android.view.SurfaceControl.Transaction();
+                if (scanoutGameSC != null) txn.setVisibility(scanoutGameSC, false);
+                if (scanoutCursorSC != null) txn.setVisibility(scanoutCursorSC, false);
+                txn.apply();
+            } catch (Exception e) {
+                android.util.Log.w("VulkanRenderer", "releaseScanoutSurfaces: hide failed: " + e);
+            }
+        }
+        // Step 2: Release Surface objects
         if (scanoutGameSurface   != null) { scanoutGameSurface.release();   scanoutGameSurface   = null; }
         if (scanoutCursorSurface != null) { scanoutCursorSurface.release(); scanoutCursorSurface = null; }
+        // Step 3: Release SurfaceControl objects
         if (scanoutGameSC        != null) { scanoutGameSC.release();        scanoutGameSC        = null; }
         if (scanoutCursorSC      != null) { scanoutCursorSC.release();      scanoutCursorSC      = null; }
     }
@@ -419,8 +491,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                 if (ahbPtr != 0) {
                     if (nativeMode && pixmap.isDirectScanout() && nativeIsScanoutActive(nativeHandle)) {
                         g.unlock();
-                        nativeScanoutSetBuffer(nativeHandle, ahbPtr,
+                        nativeScanoutSetBuffer(nativeHandle, ahbPtr, -1,
                             rx, ry, pixmap.width, pixmap.height);
+                        drainReleaseFences(nativeHandle);
                         g.lock();
                     } else {
                         nativeUpdateWindowContentAHB(nativeHandle, targetId, ahbPtr,
@@ -470,11 +543,14 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     if (nativeMode && drawable.isDirectScanout() && scanoutNow) {
                         boolean wasDelivered = nativeIsGameFrameDelivered(handle);
                         g.unlock();
-                        nativeScanoutSetBuffer(handle, ahbPtr,
+                        nativeScanoutSetBuffer(handle, ahbPtr, -1,
                             rx, ry, drawable.width, drawable.height);
+                        drainReleaseFences(handle);
                         g.lock();
                         boolean delivered = nativeIsGameFrameDelivered(handle);
+                        directFrameCount.incrementAndGet();
                         if (!xRenderingPausedForScanout && !wasDelivered && delivered) {
+                            android.util.Log.i("VulkanRenderer", "VulkanRenderer: first scanout frame delivered");
                             xServer.setRenderingEnabled(false);
                             xRenderingPausedForScanout = true;
                         }
@@ -561,7 +637,26 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     public void setCursorVisible(boolean visible) {
         cursorVisible = visible;
         synchronized (lock) {
-            if (nativeHandle != 0) { nativeSetCursorVisible(nativeHandle, visible); if (visible) sendCursorToNative(lastCursor); }
+            if (nativeHandle != 0) {
+                nativeSetCursorVisible(nativeHandle, visible);
+                if (visible) sendCursorToNative(lastCursor);
+            }
+        }
+        // Req 7.4, 7.5: when nativeMode is active, also toggle the cursor SurfaceControl layer
+        // visibility so SurfaceFlinger hides/shows the cursor without going through the GL path.
+        if (nativeMode && android.os.Build.VERSION.SDK_INT >= 29) {
+            xServerView.post(() -> {
+                android.view.SurfaceControl sc = scanoutCursorSC;
+                if (sc == null) return;
+                try {
+                    new android.view.SurfaceControl.Transaction()
+                        .setVisibility(sc, visible)
+                        .apply();
+                } catch (Exception e) {
+                    android.util.Log.w("VulkanRenderer",
+                        "setCursorVisible: SurfaceControl.Transaction failed: " + e);
+                }
+            });
         }
     }
 
@@ -612,10 +707,12 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                             }
                         }
                     } catch (Exception e) {
-                        android.util.Log.w("VulkanRenderer", "Sibling SC failed, using child SC: " + e);
+                        android.util.Log.w("VulkanRenderer", "SurfaceControl creation failed, falling back to XServer path: " + e);
                         synchronized (lock) {
                             if (nativeHandle != 0) nativeInitScanout(nativeHandle);
                         }
+                        DirectCompositorComponent dcc = directCompositorRef;
+                        if (dcc != null) dcc.onScanoutFallback();
                     }
                 } else {
                     synchronized (lock) { if (nativeHandle != 0) nativeInitScanout(nativeHandle); }
@@ -636,7 +733,110 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         xServerView.post(() -> Toast.makeText(xServerView.getContext(), msg, Toast.LENGTH_SHORT).show());
     }
 
+    /**
+     * Detaches SurfaceControl layers from the display by hiding them, without
+     * destroying the layers or the AHB pool. Called by DirectCompositorComponent.onPause().
+     * Wine naturally blocks in acquire() since no release fences arrive while paused.
+     *
+     * <p>Requirements: 9.1
+     */
+    public void detachScanoutLayers() {
+        if (android.os.Build.VERSION.SDK_INT >= 29 && (scanoutGameSC != null || scanoutCursorSC != null)) {
+            xServerView.post(() -> {
+                try {
+                    android.view.SurfaceControl.Transaction txn = new android.view.SurfaceControl.Transaction();
+                    if (scanoutGameSC != null) txn.setVisibility(scanoutGameSC, false);
+                    if (scanoutCursorSC != null) txn.setVisibility(scanoutCursorSC, false);
+                    txn.apply();
+                } catch (Exception e) {
+                    android.util.Log.w("VulkanRenderer", "detachScanoutLayers: hide failed: " + e);
+                }
+            });
+        }
+    }
+
+    /**
+     * Reattaches SurfaceControl layers by making them visible again and resuming
+     * frame submission. Called by DirectCompositorComponent.onResume().
+     * The destination rectangle is updated to match the current ViewTransformation.
+     *
+     * <p>Requirements: 9.2, 9.6
+     */
+    public void reattachScanoutLayers() {
+        if (android.os.Build.VERSION.SDK_INT >= 29 && (scanoutGameSC != null || scanoutCursorSC != null)) {
+            xServerView.post(() -> {
+                try {
+                    android.view.SurfaceControl.Transaction txn = new android.view.SurfaceControl.Transaction();
+                    if (scanoutGameSC != null) txn.setVisibility(scanoutGameSC, true);
+                    if (scanoutCursorSC != null) txn.setVisibility(scanoutCursorSC, true);
+                    txn.apply();
+                    // Update destination rect to match current screen geometry after resume
+                    synchronized (lock) {
+                        if (nativeHandle != 0) updateTransform();
+                    }
+                } catch (Exception e) {
+                    android.util.Log.w("VulkanRenderer", "reattachScanoutLayers: show failed: " + e);
+                }
+            });
+        }
+    }
+
+    /**
+     * Drains the native release fence queue and forwards each pending release
+     * to the AHardwareBufferPool. Called after each nativeScanoutSetBuffer.
+     */
+    private void drainReleaseFences(long handle) {
+        AHardwareBufferPool pool = ahbPool;
+        if (pool == null) return;
+        int[] pending;
+        while ((pending = nativePollReleaseFence(handle)) != null) {
+            if (pending.length >= 2) {
+                pool.release(pending[0], pending[1]);
+            }
+        }
+    }
+
+    /**
+     * Sets the AHardwareBufferPool to use for release fence forwarding.
+     * Called by DirectCompositorComponent when the pool is initialized.
+     * Pass null to clear the reference when the pool is destroyed.
+     */
+    public void setAHBPool(AHardwareBufferPool pool) {
+        this.ahbPool = pool;
+    }
+
+    /**
+     * Sets the DirectCompositorComponent reference for fallback signaling.
+     * Called during component wiring so VulkanRenderer can notify the compositor
+     * when SurfaceControl creation fails or context is lost.
+     */
+    public void setDirectCompositor(DirectCompositorComponent dcc) {
+        this.directCompositorRef = dcc;
+    }
+
     public boolean isNativeMode() { return nativeMode; }
+
+    /**
+     * Called by the activity/container setup code before the surface is created.
+     * Activates nativeMode if the driver is Vulkan-based (dxvk or vkd3d).
+     * Req 6.1, 6.2, 6.6, 10.1
+     */
+    public void setGraphicsDriver(String graphicsDriver) {
+        boolean useNative = "dxvk".equalsIgnoreCase(graphicsDriver)
+                         || "vkd3d".equalsIgnoreCase(graphicsDriver);
+        if (android.os.Build.VERSION.SDK_INT < 26) {
+            if (useNative) {
+                android.util.Log.w("VulkanRenderer",
+                    "VulkanRenderer: nativeMode requested but API < 26, disabling");
+            }
+            useNative = false;
+        }
+        setNativeMode(useNative);
+        if (useNative) {
+            android.util.Log.i("VulkanRenderer",
+                "VulkanRenderer: nativeMode enabled, direct compositing path active");
+        }
+    }
 
     public void setDriverInfo(String driverPath, String libraryName, String nativeLibDir) {
         this.driverPath = driverPath;
@@ -651,7 +851,16 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     }
 
     public void dumpRendererInfo() {
-        synchronized (lock) { if (nativeHandle != 0) nativeDumpRendererInfo(nativeHandle); }
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeDumpRendererInfo(nativeHandle);
+        }
+        // Req 10.5: log nativeMode, pool buffer count, and directFrameCount
+        AHardwareBufferPool pool = ahbPool;
+        int poolCount = (pool != null) ? pool.getCount() : 0;
+        android.util.Log.i("VulkanRenderer",
+            "VulkanRenderer: nativeMode=" + nativeMode
+            + " poolBufferCount=" + poolCount
+            + " directFrameCount=" + directFrameCount.get());
     }
 
 

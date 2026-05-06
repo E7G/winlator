@@ -1,6 +1,7 @@
 #pragma once
 #include <vulkan/vulkan.h>
 #include <list>
+#include <utility>
 #include <vulkan/vulkan_android.h>
 struct VkTable {
 
@@ -140,12 +141,14 @@ public:
     void applyScanoutBuffer();
     void initScanoutFromWindows(ANativeWindow* gameWin, ANativeWindow* cursorWin);
     void scanoutSetDst(int x, int y, int w, int h);
-    void scanoutSetBuffer(AHardwareBuffer* ahb, int x, int y, int w, int h);
+    void scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFenceFd, int x, int y, int w, int h);
     void scanoutSetCursorImage(void* pixels, short w, short h, short stride);
     void scanoutSetCursorPos(short x, short y, short hotX, short hotY);
+    std::pair<int,int> pollReleaseFence();
     std::atomic<bool> scanoutActive{false};
     std::atomic<bool> gameFrameDelivered{false};
     std::atomic<bool> surfaceDetached{false};
+    std::atomic<uint64_t> directFrameCount{0};
 
     void detachSurface();
     bool reattachSurface(ANativeWindow* newWindow);
@@ -256,6 +259,7 @@ private:
     void*  fnSTSetVisibility  = nullptr;
     void*  fnSTSetGeometry    = nullptr;
     void*  fnSTSetBackPressure = nullptr;
+    void*  fnSTSetOnComplete   = nullptr;
     bool   loadScanoutApi();
 
     int32_t scanoutDstX=0, scanoutDstY=0, scanoutDstW=0, scanoutDstH=0;
@@ -263,10 +267,14 @@ private:
     int32_t lastDstX=0, lastDstY=0, lastDstW=0, lastDstH=0;
     bool    gameScVisible      = false;
 
-    struct ScanoutPending { AHardwareBuffer* ahb=nullptr; int x=0,y=0,w=0,h=0; };
+    struct ScanoutPending { AHardwareBuffer* ahb=nullptr; int acquireFenceFd=-1; int slotIndex=-1; int x=0,y=0,w=0,h=0; };
     std::mutex        scanoutMutex;
     ScanoutPending    scanoutPending{};
     std::atomic<bool> scanoutPendingDirty{false};
+
+    struct ReleasePending { int slotIndex; int releaseFd; };
+    std::mutex                   releaseMutex;
+    std::vector<ReleasePending>  releaseQueue;
 
     std::atomic<int>  pointerX{0}, pointerY{0};
     float sceneOffsetX=0.f, sceneOffsetY=0.f, sceneScaleX=1.f, sceneScaleY=1.f;
