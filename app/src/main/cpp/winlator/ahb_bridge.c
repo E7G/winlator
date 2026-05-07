@@ -14,8 +14,9 @@
 
 #include <android/hardware_buffer.h>
 #include <android/log.h>
+#include <errno.h>
 #include <jni.h>
-#include <sync/sync.h>
+#include <poll.h>
 #include <unistd.h>
 
 #define LOG_TAG "AHB_Bridge"
@@ -151,13 +152,22 @@ Java_com_winlator_cmod_renderer_AHardwareBufferPool_nativeWaitFence(
         return 0;
     }
 
-    int ret = sync_wait((int)fd, (int)timeoutMs);
+    /* Use poll() to wait for the sync fence fd to become readable, which
+     * is equivalent to sync_wait() from <sync/sync.h> but avoids the NDK
+     * header that is not in the standard sysroot include path. */
+    struct pollfd pfd = { .fd = (int)fd, .events = POLLIN };
+    int ret = poll(&pfd, 1, (int)timeoutMs);
     /* Close fd regardless of outcome, as documented. */
     close((int)fd);
 
-    if (ret < 0) {
-        LOGE("nativeWaitFence: sync_wait failed or timed out (fd=%d, timeoutMs=%d, errno=%d)",
-             fd, timeoutMs, ret);
+    if (ret == 0) {
+        /* Timeout */
+        LOGE("nativeWaitFence: timed out waiting for fence (fd=%d, timeoutMs=%d)",
+             fd, timeoutMs);
+        return -1;
+    } else if (ret < 0) {
+        LOGE("nativeWaitFence: poll failed (fd=%d, timeoutMs=%d, errno=%d)",
+             fd, timeoutMs, errno);
         return -1;
     }
 

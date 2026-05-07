@@ -118,6 +118,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native boolean nativeIsGameFrameDelivered(long handle);
     private native void nativeSetScanoutWindow(long handle, android.view.Surface game, android.view.Surface cursor);
     private native void nativeScanoutSetDst(long handle, int x, int y, int w, int h);
+    private native void nativeStartPresentReceiver(long handle, int clientFd, long[] ahbPtrs, int screenWidth, int screenHeight);
+    private native void nativeStartPresentReceiverWithSlots(long handle, int clientFd, long ahb0, long ahb1, long ahb2, long ahb3, int screenWidth, int screenHeight);
+    private native void nativeStopPresentReceiver(long handle);
     private native void nativeSetVerboseLog(long handle, boolean v);
     private native void nativeDumpRendererInfo(long handle);
     private native void nativeSetFilterMode(long handle, int mode);
@@ -474,10 +477,6 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     }
 
     public void onUpdateWindowContentDirect(Window window, Drawable pixmap, short xOff, short yOff) {
-        if (hudRef != null && !nativeMode) {
-            hudRef.setIsNative(false);
-            hudRef.onFrame();
-        }
         if (nativeHandle == 0 || pixmap == null) return;
         Drawable targetDrawable = window.getContent();
         long targetId = did(targetDrawable);
@@ -495,9 +494,17 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                             rx, ry, pixmap.width, pixmap.height);
                         drainReleaseFences(nativeHandle);
                         g.lock();
+                        if (hudRef != null) {
+                            hudRef.setIsNative(true);
+                            hudRef.onFrame();
+                        }
                     } else {
                         nativeUpdateWindowContentAHB(nativeHandle, targetId, ahbPtr,
                             pixmap.width, pixmap.height, rx, ry);
+                        if (hudRef != null && !nativeMode) {
+                            hudRef.setIsNative(false);
+                            hudRef.onFrame();
+                        }
                     }
                     return;
                 }
@@ -506,6 +513,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     short s = g.getStride() > 0 ? g.getStride() : pixmap.width;
                     nativeUpdateWindowContent(nativeHandle, targetId, vd,
                         pixmap.width, pixmap.height, s, rx, ry);
+                    if (hudRef != null) {
+                        hudRef.setIsNative(false);
+                        hudRef.onFrame();
+                    }
                     return;
                 }
             }
@@ -514,6 +525,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             short stride = (short)(buf.capacity() / (pixmap.height * 4));
             nativeUpdateWindowContent(nativeHandle, targetId, buf,
                 pixmap.width, pixmap.height, stride, rx, ry);
+            if (hudRef != null) {
+                hudRef.setIsNative(false);
+                hudRef.onFrame();
+            }
         }
     }
 
@@ -561,6 +576,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     } else if (!scanoutNow) {
                         nativeUpdateWindowContentAHB(handle, drawableId, ahbPtr,
                             drawable.width, drawable.height, rx, ry);
+                        if (hudRef != null) {
+                            hudRef.setIsNative(false);
+                            hudRef.onFrame();
+                        }
                     }
                     return;
                 }
@@ -569,6 +588,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     short s = g.getStride() > 0 ? g.getStride() : drawable.width;
                     nativeUpdateWindowContent(handle, drawableId, vd,
                         drawable.width, drawable.height, s, rx, ry);
+                    if (hudRef != null) {
+                        hudRef.setIsNative(false);
+                        hudRef.onFrame();
+                    }
                     return;
                 }
             }
@@ -577,6 +600,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             short stride = (short)(buf.capacity() / (drawable.height * 4));
             nativeUpdateWindowContent(handle, drawableId, buf,
                 drawable.width, drawable.height, stride, rx, ry);
+            if (hudRef != null) {
+                hudRef.setIsNative(false);
+                hudRef.onFrame();
+            }
         }
     }
 
@@ -814,6 +841,65 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         this.directCompositorRef = dcc;
     }
 
+    /**
+     * Submits an AHardwareBuffer frame directly to SurfaceFlinger via SurfaceControl.
+     * Called by AHBSocketServerComponent when Wine presents a frame.
+     *
+     * @param ahbPtr the AHardwareBuffer pointer to display
+     * @param acquireFenceFd the acquire fence fd (-1 if none)
+     */
+    public void submitDirectFrame(long ahbPtr, int acquireFenceFd) {
+        synchronized (lock) {
+            if (nativeHandle == 0) return;
+            if (!nativeMode) {
+                // Activate nativeMode on first direct frame
+                setNativeMode(true);
+                android.util.Log.i("VulkanRenderer",
+                    "VulkanRenderer: nativeMode enabled by first direct frame");
+            }
+            nativeScanoutSetBuffer(nativeHandle, ahbPtr, acquireFenceFd,
+                0, 0, xServer.screenInfo.width, xServer.screenInfo.height);
+            drainReleaseFences(nativeHandle);
+            directFrameCount.incrementAndGet();
+        }
+    }
+
+    /**
+     * Starts the native present-receiver thread that reads present_msg from the
+     * Wine client socket and calls scanoutSetBuffer directly in C++.
+     * This bypasses XConnectorEpoll for the hot path.
+     *
+     * @param clientFd the socket fd connected to Wine's Vulkan WSI
+     * @param ahb0 AHardwareBuffer pointer for slot 0
+     * @param ahb1 AHardwareBuffer pointer for slot 1
+     * @param ahb2 AHardwareBuffer pointer for slot 2
+     * @param screenWidth game screen width
+     * @param screenHeight game screen height
+     */
+    public void startPresentReceiver(int clientFd, long ahb0, long ahb1, long ahb2, long ahb3,
+                                     int screenWidth, int screenHeight) {
+        synchronized (lock) {
+            if (nativeHandle == 0) return;
+            // Do NOT enable nativeMode here — nativeMode is activated lazily by
+            // submitDirectFrame() when the FIRST actual AHB frame is delivered.
+            // Enabling it here would disable X11 display even when the AHB swapchain
+            // creation fails (e.g., dispatch patching couldn't intercept vkCreateSwapchainKHR),
+            // causing a permanent black screen with no fallback.
+            nativeStartPresentReceiverWithSlots(nativeHandle, clientFd,
+                ahb0, ahb1, ahb2, ahb3, screenWidth, screenHeight);
+        }
+    }
+
+    /**
+     * Stops the native present-receiver thread.
+     */
+    public void stopPresentReceiver() {
+        synchronized (lock) {
+            if (nativeHandle == 0) return;
+            nativeStopPresentReceiver(nativeHandle);
+        }
+    }
+
     public boolean isNativeMode() { return nativeMode; }
 
     /**
@@ -822,20 +908,11 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
      * Req 6.1, 6.2, 6.6, 10.1
      */
     public void setGraphicsDriver(String graphicsDriver) {
-        boolean useNative = "dxvk".equalsIgnoreCase(graphicsDriver)
-                         || "vkd3d".equalsIgnoreCase(graphicsDriver);
-        if (android.os.Build.VERSION.SDK_INT < 26) {
-            if (useNative) {
-                android.util.Log.w("VulkanRenderer",
-                    "VulkanRenderer: nativeMode requested but API < 26, disabling");
-            }
-            useNative = false;
-        }
-        setNativeMode(useNative);
-        if (useNative) {
-            android.util.Log.i("VulkanRenderer",
-                "VulkanRenderer: nativeMode enabled, direct compositing path active");
-        }
+        // nativeMode is now controlled exclusively by DirectCompositorComponent.
+        // This method is kept for API compatibility and logging only.
+        android.util.Log.d("VulkanRenderer",
+            "VulkanRenderer: setGraphicsDriver called with driver=" + graphicsDriver
+            + " (nativeMode controlled by DirectCompositorComponent)");
     }
 
     public void setDriverInfo(String driverPath, String libraryName, String nativeLibDir) {

@@ -1,5 +1,6 @@
 package com.winlator.cmod.xenvironment.components;
 
+// import com.winlator.cmod.BuildConfig; // removed - use hardcoded debug flag
 import android.app.Service;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -30,6 +31,7 @@ import com.winlator.cmod.fexcore.FEXCorePresetManager;
 import com.winlator.cmod.xconnector.UnixSocketConfig;
 import com.winlator.cmod.xenvironment.EnvironmentComponent;
 import com.winlator.cmod.xenvironment.ImageFs;
+import com.winlator.cmod.xenvironment.components.AHBSocketServerComponent;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -151,6 +153,12 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
                 extractBox64Files();
             checkDependencies();
             pid = execGuestProgram();
+            // === DIAGNOSTICS ===
+            // Log the top-level guest-program PID so we can correlate with the
+            // PID reported by the AHB ICD wrapper's constructor log. If they
+            // don't match (or the ICD CTOR reports a different PID), we know
+            // the Vulkan driver is being loaded by a different (probe) process.
+            Log.i("GuestLauncher", "execGuestProgram: started guest root PID=" + pid);
         }
     }
 
@@ -305,6 +313,19 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
  
         envVars.put("ANDROID_SYSVSHM_SERVER", rootDir.getPath() + UnixSocketConfig.SYSVSHM_SERVER_PATH);
+        envVars.put("ANDROID_AHB_SERVER", rootDir.getPath() + AHBSocketServerComponent.AHB_SOCKET_PATH);
+        envVars.put("ENABLE_AHB_LAYER", "1");
+        envVars.put("VK_LAYER_PATH", rootDir.getPath() + "/usr/share/vulkan/implicit_layer.d");
+        envVars.put("VK_INSTANCE_LAYERS", "VK_LAYER_WINLATOR_ahb_direct");
+
+        // Verbose Vulkan loader + Wine debug logging (only in debug builds)
+        if (true) { // BuildConfig.DEBUG
+            envVars.put("VK_LOADER_DEBUG", "all");
+            String existingWineDebug = envVars.get("WINEDEBUG");
+            if (existingWineDebug == null || existingWineDebug.isEmpty()) {
+                envVars.put("WINEDEBUG", "+vulkan,+loaddll,+module");
+            }
+        }
 
         String primaryDNS = "8.8.4.4";
         ConnectivityManager connectivityManager = (ConnectivityManager) context.getSystemService(Service.CONNECTIVITY_SERVICE);
@@ -356,6 +377,13 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         envVars.put("FAKE_EVDEV_DIR", devInputDir.getAbsolutePath());
         envVars.put("FAKE_EVDEV_VIBRATION", "1");
+
+        // Add AHB preload interceptor for direct compositing
+        File ahbPreload = new File(imageFs.getLibDir(), "libahb_preload.so");
+        if (ahbPreload.exists()) {
+            if (!ld_preload.isEmpty()) ld_preload += ":";
+            ld_preload += ahbPreload.getAbsolutePath();
+        }
 
         Log.d("GuestLauncher", "Final LD_PRELOAD: " + ld_preload);
         envVars.put("LD_PRELOAD", ld_preload);

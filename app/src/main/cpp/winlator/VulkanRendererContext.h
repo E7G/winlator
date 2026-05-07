@@ -141,13 +141,14 @@ public:
     void applyScanoutBuffer();
     void initScanoutFromWindows(ANativeWindow* gameWin, ANativeWindow* cursorWin);
     void scanoutSetDst(int x, int y, int w, int h);
-    void scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFenceFd, int x, int y, int w, int h);
+    void scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFenceFd, int slotIndex, int x, int y, int w, int h);
     void scanoutSetCursorImage(void* pixels, short w, short h, short stride);
     void scanoutSetCursorPos(short x, short y, short hotX, short hotY);
     std::pair<int,int> pollReleaseFence();
     std::atomic<bool> scanoutActive{false};
     std::atomic<bool> gameFrameDelivered{false};
     std::atomic<bool> surfaceDetached{false};
+    std::atomic<int>  scanoutSocketFd{-1};
     std::atomic<uint64_t> directFrameCount{0};
 
     void detachSurface();
@@ -275,7 +276,6 @@ private:
     struct ReleasePending { int slotIndex; int releaseFd; };
     std::mutex                   releaseMutex;
     std::vector<ReleasePending>  releaseQueue;
-
     std::atomic<int>  pointerX{0}, pointerY{0};
     float sceneOffsetX=0.f, sceneOffsetY=0.f, sceneScaleX=1.f, sceneScaleY=1.f;
 

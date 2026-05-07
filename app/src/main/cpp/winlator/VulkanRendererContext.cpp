@@ -6,6 +6,7 @@
 #include <cstring>
 #include <algorithm>
 #include <unistd.h>
+#include <sys/socket.h>
 #include <dlfcn.h>
 #include "window_vert.h"
 #include "window_frag.h"
@@ -1319,7 +1320,7 @@ void VulkanRendererContext::destroyScanout() {
     scanoutCursorBufW = scanoutCursorBufH = 0;
 }
 
-void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFenceFd, int x, int y, int w, int h) {
+void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFenceFd, int slotIndex, int x, int y, int w, int h) {
     if (!scanoutActive.load() || !scanoutGameSC || !ahb) {
         RLOG("scanoutSetBuffer: SKIPPED active=%d sc=%p ahb=%p",
             (int)scanoutActive.load(),scanoutGameSC,(void*)ahb);
@@ -1336,15 +1337,12 @@ void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFe
             hasOverlay ? "YES" : "NO");
         scanoutNeedsGpuBlit = !hasOverlay;
     }
-    AHardwareBuffer_acquire(ahb);
+    // AHardwareBuffer_acquire removed: pool owns the ref, SurfaceFlinger manages its own
     { std::lock_guard<std::mutex> lk(scanoutMutex);
-      if (scanoutPendingDirty.load() && scanoutPending.ahb && scanoutPending.ahb != ahb) {
-          AHardwareBuffer_release(scanoutPending.ahb);
-      }
       if (scanoutPendingDirty.load() && scanoutPending.acquireFenceFd >= 0) {
           close(scanoutPending.acquireFenceFd);
       }
-      scanoutPending = {ahb, acquireFenceFd, -1, x, y, w, h};
+      scanoutPending = {ahb, acquireFenceFd, slotIndex, x, y, w, h};
       scanoutPendingDirty.store(true, std::memory_order_release); }
     needsRender.store(true, std::memory_order_release);
     dirtyCV.notify_one();
@@ -1590,39 +1588,37 @@ void VulkanRendererContext::applyScanoutBuffer() {
     ST_SETVIS(t,scanoutGameSC,1);
     ST_SETBP(t,scanoutGameSC,false);
 
-    // Register onComplete callback for release fence if available
-    if (fnSTSetOnComplete) {
+    // Register onComplete callback to send MSG_RELEASE for the PREVIOUS buffer.
+    // When this transaction completes, SurfaceFlinger releases the previously-displayed buffer.
+    static int scanoutPrevDisplayedSlot = -1;
+    if (fnSTSetOnComplete && scanoutPrevDisplayedSlot >= 0) {
         struct OnCompleteCtx {
-            VulkanRendererContext* self;
+            int socketFd;
             int slotIndex;
         };
-        auto* ctx = new OnCompleteCtx{this, p.slotIndex};
-        ((pfn_STSetOnComplete)fnSTSetOnComplete)(t, (void*)ctx,
-            [](void* context, void* stats) {
-                auto* c = reinterpret_cast<OnCompleteCtx*>(context);
-                // Get the previous release fence fd from stats
-                // ASurfaceTransactionStats_getPreviousReleaseFenceFd is API 29
-                typedef int (*pfn_GetReleaseFence)(void*, void*);
-                // We load this dynamically; for now use -1 if unavailable
-                int releaseFd = -1;
-                void* lib = dlopen("libandroid.so", RTLD_NOW | RTLD_NOLOAD);
-                if (lib) {
-                    auto fn = (pfn_GetReleaseFence)dlsym(lib, "ASurfaceTransactionStats_getPreviousReleaseFenceFd");
-                    if (fn && c->self->scanoutGameSC) {
-                        releaseFd = fn(stats, c->self->scanoutGameSC);
-                    }
-                }
-                { std::lock_guard<std::mutex> lk(c->self->releaseMutex);
-                  c->self->releaseQueue.push_back({c->slotIndex, releaseFd}); }
-                delete c;
-            });
+        int sockFd = scanoutSocketFd.load(std::memory_order_relaxed);
+        if (sockFd >= 0) {
+            auto* ctx = new OnCompleteCtx{sockFd, scanoutPrevDisplayedSlot};
+            ((pfn_STSetOnComplete)fnSTSetOnComplete)(t, (void*)ctx,
+                [](void* context, void* stats) {
+                    auto* c = reinterpret_cast<OnCompleteCtx*>(context);
+                    // Send MSG_RELEASE directly on the socket — thread-safe
+                    struct { uint8_t type; uint32_t slot_index; int32_t release_fd; } rel;
+                    rel.type = 2; // MSG_RELEASE
+                    rel.slot_index = (uint32_t)c->slotIndex;
+                    rel.release_fd = -1;
+                    send(c->socketFd, &rel, sizeof(rel), MSG_NOSIGNAL);
+                    delete c;
+                });
+        }
     }
+    scanoutPrevDisplayedSlot = p.slotIndex;
 
     ST_APPLY(t);
     directFrameCount.fetch_add(1, std::memory_order_relaxed);
     gameFrameDelivered.store(true);
     ST_DELETE(t);
-    AHardwareBuffer_release(ahb);
+    // AHardwareBuffer_release removed: no matching acquire, pool owns the ref
 }
 
 void VulkanRendererContext::scanoutSetDst(int x, int y, int w, int h) {

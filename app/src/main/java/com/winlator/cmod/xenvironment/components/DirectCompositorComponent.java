@@ -47,7 +47,7 @@ public class DirectCompositorComponent extends EnvironmentComponent {
      */
     public DirectCompositorComponent(VulkanRenderer renderer,
                                      int screenWidth, int screenHeight) {
-        this(renderer, 3, screenWidth, screenHeight);
+        this(renderer, 4, screenWidth, screenHeight);
     }
 
     @Override
@@ -67,10 +67,14 @@ public class DirectCompositorComponent extends EnvironmentComponent {
 
         renderer.setDirectCompositor(this);
         renderer.setAHBPool(pool);
-        renderer.setNativeMode(true);
+        // NOTE: Do NOT call renderer.setNativeMode(true) here.
+        // nativeMode will be activated by VulkanRenderer when the first direct frame
+        // is actually delivered by the Wine Vulkan WSI. Until then, the XServer path
+        // remains active so the desktop is visible.
         active = true;
-        Log.i(LOG_TAG, "start: direct compositing active (pool=" + poolSize
-                + ", " + screenWidth + "x" + screenHeight + ")");
+        Log.i(LOG_TAG, "start: pool ready (pool=" + poolSize
+                + ", " + screenWidth + "x" + screenHeight
+                + "), waiting for Wine WSI to deliver first frame");
     }
 
     @Override
@@ -152,6 +156,11 @@ public class DirectCompositorComponent extends EnvironmentComponent {
     /** Returns the AHardwareBufferPool, or {@code null} if not active. */
     public AHardwareBufferPool getPool() {
         return pool;
+    }
+
+    /** Returns the VulkanRenderer for frame submission. */
+    public VulkanRenderer getRenderer() {
+        return renderer;
     }
 
     /** Returns {@code true} if the direct compositing path is active. */

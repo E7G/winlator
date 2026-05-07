@@ -408,7 +408,7 @@ public class AHardwareBufferPool {
     private static native void nativeDestroyBuffer(long ptr);
 
     /** @return 0 on success, -1 on failure */
-    private static native int nativeSendBufferToSocket(long ptr, int fd);
+    public static native int nativeSendBufferToSocket(long ptr, int fd);
 
     /** @return AHardwareBuffer* as jlong, or 0 on failure */
     private static native long nativeReceiveBufferFromSocket(int fd);
