@@ -28,18 +28,28 @@
 /* Maximum swapchain images */
 #define AHB_MAX_IMAGES 4
 
-/* IPC message structures */
+/* IPC message structures.
+ *
+ * IMPORTANT: layout changes here are a protocol break. Both the layer
+ * (libahb_layer.so) and the Android-side native lib (libwinlator.so) MUST
+ * be rebuilt and deployed together — the receiver parses fixed-size messages
+ * by sizeof(struct) and any size mismatch corrupts subsequent reads. */
 struct present_msg {
     uint8_t  type;         /* MSG_PRESENT */
     uint32_t slot_index;
     int32_t  acquire_fd;   /* sent as SCM_RIGHTS ancillary data */
     int32_t  dst_x, dst_y, dst_w, dst_h;
+    uint64_t present_id;   /* DXVK's VkPresentIdKHR.pPresentIds[i]; 0 if none */
 };
 
 struct release_msg {
     uint8_t  type;         /* MSG_RELEASE */
     uint32_t slot_index;
     int32_t  release_fd;   /* sent as SCM_RIGHTS ancillary data */
+    uint8_t  displayed;    /* 1 = onComplete release (frame was shown);
+                            * 0 = mailbox-drain release (frame was skipped).
+                            * Only displayed=1 advances the layer's
+                            * display_count for vkWaitForPresentKHR pacing. */
 };
 
 struct buffer_msg {
@@ -144,10 +154,14 @@ VkResult wine_ahb_acquire_next_image(struct wine_vk_swapchain *swapchain,
 VkResult wine_ahb_get_swapchain_images(struct wine_vk_swapchain *swapchain,
                                        uint32_t *count, VkImage *images);
 
-/* Present a rendered frame */
+/* Present a rendered frame.
+ * present_id: DXVK's VkPresentIdKHR for this present (0 if none). Sent to
+ * Android so the receiver's MSG_RELEASE callbacks can echo it back, letting
+ * the layer's release-reader thread correlate releases with the specific
+ * DXVK present_id that vkWaitForPresentKHR is waiting on. */
 VkResult wine_ahb_queue_present(struct wine_vk_swapchain *swapchain,
                                 VkQueue queue, uint32_t image_index,
-                                VkFence render_fence);
+                                VkFence render_fence, uint64_t present_id);
 
 /* Import an AHardwareBuffer into a swapchain slot as a VkImage */
 VkResult import_ahb_to_vk_image(struct wine_vk_swapchain *swapchain,

@@ -367,7 +367,10 @@ VkResult import_ahb_to_vk_image(struct wine_vk_swapchain *swapchain,
         .pNext = &ext_mem_info,
         .flags = 0,
         .imageType = VK_IMAGE_TYPE_2D,
-        .format = VK_FORMAT_B8G8R8A8_UNORM,  /* DXVK requests B8G8R8A8; Adreno AHBs support both channel orders */
+        .format = VK_FORMAT_R8G8B8A8_UNORM,  /* AHB native format is RGBA8888 (HAL_PIXEL_FORMAT_RGBA_8888=1).
+                                              * Importing as R8G8B8A8 matches the byte layout SurfaceFlinger reads.
+                                              * The blit from DXVK's B8G8R8A8 trojan uses vkCmdBlitImage (NOT CopyImage),
+                                              * which does format-aware channel reinterpretation: BGRA→RGBA. */
         .extent = { (uint32_t)width, (uint32_t)height, 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
@@ -754,7 +757,7 @@ VkResult wine_ahb_acquire_next_image(struct wine_vk_swapchain *swapchain,
  */
 VkResult wine_ahb_queue_present(struct wine_vk_swapchain *swapchain,
                                 VkQueue queue, uint32_t image_index,
-                                VkFence render_fence)
+                                VkFence render_fence, uint64_t present_id)
 {
     if (!swapchain || image_index >= swapchain->image_count)
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -791,6 +794,7 @@ VkResult wine_ahb_queue_present(struct wine_vk_swapchain *swapchain,
         .dst_y = 0,
         .dst_w = surface->width,
         .dst_h = surface->height,
+        .present_id = present_id,
     };
 
     int send_result;

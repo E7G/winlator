@@ -1195,6 +1195,7 @@ bool VulkanRendererContext::loadScanoutApi() {
     fnSTSetGeometry      = dlsym(lib, "ASurfaceTransaction_setGeometry");
     fnSTSetBackPressure  = dlsym(lib, "ASurfaceTransaction_setEnableBackPressure");
     fnSTSetOnComplete    = dlsym(lib, "ASurfaceTransaction_setOnComplete");
+    fnSTSetFrameRate     = dlsym(lib, "ASurfaceTransaction_setFrameRate"); /* API 30+; may be NULL on older Android */
 
     bool coreOk = fnSCCreateFromWin && fnSCRelease &&
                   fnSTCreate && fnSTDelete && fnSTApply &&
@@ -1206,6 +1207,8 @@ bool VulkanRendererContext::loadScanoutApi() {
         return false;
     }
     if (!fnSTSetZOrder) SCANOUT_LOG("loadScanoutApi: setZOrder unavailable (non-critical)");
+    SCANOUT_LOG("loadScanoutApi: setFrameRate %s (needed for >60Hz refresh)",
+        fnSTSetFrameRate ? "available" : "NOT AVAILABLE (Android < 11?)");
     const char* gpuBlitEnv = std::getenv("WINLATOR_SCANOUT_GPU_BLIT");
     scanoutEnvGpuBlit = (!gpuBlitEnv || gpuBlitEnv[0] == '1');
     scanoutAlwaysGpuBlit = scanoutEnvGpuBlit || swapRB;
@@ -1247,6 +1250,18 @@ void VulkanRendererContext::initScanout() {
     ST_SETZORDER(t, scanoutCursorSC, 1);
     ST_SETVIS(t, scanoutGameSC,   0);
     ST_SETVIS(t, scanoutCursorSC, 0);
+
+    /* Request the panel's max refresh rate (e.g., 120 Hz on Odin 2 Portal).
+     * Compatibility=0 (DEFAULT) tells SurfaceFlinger to pick the nearest rate
+     * the panel actually supports. Without this, SurfaceFlinger defaults to
+     * 60 Hz which caps our onComplete-paced release chain at 60 fps. */
+    if (fnSTSetFrameRate) {
+        typedef void (*pfn_STSetFrameRate)(void*, void*, float, int8_t);
+        ((pfn_STSetFrameRate)fnSTSetFrameRate)(t, scanoutGameSC,   120.0f, 0);
+        ((pfn_STSetFrameRate)fnSTSetFrameRate)(t, scanoutCursorSC, 120.0f, 0);
+        SCANOUT_LOG("initScanout: requested 120 Hz frame rate on game/cursor SC");
+    }
+
     ST_APPLY(t);
     ST_DELETE(t);
 
@@ -1602,11 +1617,16 @@ void VulkanRendererContext::applyScanoutBuffer() {
             ((pfn_STSetOnComplete)fnSTSetOnComplete)(t, (void*)ctx,
                 [](void* context, void* stats) {
                     auto* c = reinterpret_cast<OnCompleteCtx*>(context);
-                    // Send MSG_RELEASE directly on the socket — thread-safe
-                    struct { uint8_t type; uint32_t slot_index; int32_t release_fd; } rel;
+                    /* MSG_RELEASE with displayed=1 — this fires from
+                     * SurfaceFlinger's onComplete, meaning the previous slot's
+                     * buffer was actually scanned out. The layer uses
+                     * displayed=1 to advance its vsync-paced display counter
+                     * that drives vkWaitForPresentKHR. */
+                    struct { uint8_t type; uint32_t slot_index; int32_t release_fd; uint8_t displayed; } rel;
                     rel.type = 2; // MSG_RELEASE
                     rel.slot_index = (uint32_t)c->slotIndex;
                     rel.release_fd = -1;
+                    rel.displayed = 1;  // onComplete = real vsync tick
                     send(c->socketFd, &rel, sizeof(rel), MSG_NOSIGNAL);
                     delete c;
                 });

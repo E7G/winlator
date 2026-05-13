@@ -1,280 +1,515 @@
 # Direct Android Compositing — Architecture Analysis
 
-## What This Feature Is
+This document reflects the actual state of the codebase after the debugging
+work in May 2026 that took the implementation from "Broforce only" to
+"all tested Vulkan games run."
 
-The goal is to eliminate the existing frame delivery chain for Vulkan-based games (DXVK / VKD3D):
+---
+
+## Goal
+
+Replace the X11-routed Vulkan present path:
 
 ```
 DXVK → Wine X11 socket → Java X11 server → GL compositor → SurfaceFlinger
 ```
 
-And replace it with a zero-copy path:
+with a zero-copy direct compositing path:
 
 ```
-DXVK → AHardwareBuffer (GPU memory) → SurfaceControl → SurfaceFlinger
+DXVK → trojan swapchain → blit to AHardwareBuffer → SurfaceControl → SurfaceFlinger
 ```
 
-OpenGL games (virgl, wined3d) continue using the X server path unchanged. The X server is preserved intact throughout Phase 1 and can be deleted in a future phase.
+OpenGL games (virgl, wined3d) keep using the X11 path unchanged.
 
 ---
 
-## The Three-Layer Architecture
+## Three execution contexts
 
-The system spans three distinct execution contexts that must coordinate without blocking each other.
+The pipeline spans three processes/contexts that must coordinate without
+blocking each other:
 
-### Layer 1 — Wine Process (Box64 / ARM64)
+**Wine process (Box64/ARM64)** — DXVK renders Vulkan frames. Our Vulkan
+layer (`libahb_layer.so`) intercepts swapchain operations, creates a real
+"trojan" swapchain to satisfy Wine's thunk validation, hands DXVK the
+trojan's images to render into, and on every present blits trojan→AHB and
+sends a present message to Android via a Unix socket. A dedicated
+release-reader thread receives `MSG_RELEASE` messages and signals an
+internal cv for waiters.
 
-DXVK or VKD3D renders into `VkImage` objects that are backed by `AHardwareBuffer` memory. These buffers are owned by the Android app but imported into Vulkan on the Wine side. When a frame is ready, Wine exports a GPU fence as a sync fd (acquire fence) and sends it to the Android app over a Unix socket. Wine then waits for a release fence to come back before reusing that image slot.
+**Android app process** — Hosts the `AHardwareBufferPool`, a present-receiver
+thread (`vulkan_jni.cpp`), a display thread (mailbox semantics), and the
+`SurfaceControl` transaction submission. Sends `MSG_RELEASE` back to Wine
+for both displayed frames (via `onComplete`) and dropped frames (via the
+mailbox-drain in the receiver).
 
-### Layer 2 — Android App Process
-
-Manages the `AHardwareBufferPool`, the `SurfaceControl` layers, and the `ASurfaceTransaction` submission loop. When it receives a present message from Wine, it calls `ASurfaceTransaction_setBuffer` with the buffer pointer and the acquire fence. SurfaceFlinger takes it from there. When SurfaceFlinger is done with the buffer, the `onComplete` callback fires and the release fence is forwarded back to Wine.
-
-### Layer 3 — SurfaceFlinger
-
-Receives the buffer directly from GPU memory. Waits on the acquire fence before scan-out. Signals the release fence when done. No pixel copy occurs at any point.
-
----
-
-## Component Breakdown
-
-### `AHardwareBufferPool.java` ✅ Complete
-
-Pre-allocates N buffers (default 3) at startup. Provides `acquire()` / `release(index, fd)` semantics with a 16ms timeout (one frame at 60Hz). Release fences are waited on by a background daemon thread pool so the Wine presentation thread is never blocked on a fence signal. The pool is the single source of truth for buffer ownership.
-
-Key design choices:
-- Buffers are allocated with `AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM` and `GPU_FRAMEBUFFER | GPU_SAMPLED_IMAGE | COMPOSER_OVERLAY` usage flags.
-- The `AHardwareBufferNativeCalls` interface is injected, making the class fully testable without loading `libwinlator.so`. This enabled the comprehensive jqwik property-based test suite.
-- Consecutive drop count is tracked and logged so frame budget overruns are visible in logcat.
-
-### `ahb_bridge.c` (JNI, `libwinlator.so`) ✅ Complete
-
-Five JNI functions that wrap NDK calls:
-- `nativeCreateBuffer` / `nativeDestroyBuffer` — `AHardwareBuffer_allocate` / `_release`
-- `nativeSendBufferToSocket` / `nativeReceiveBufferFromSocket` — `AHardwareBuffer_sendHandleToUnixSocket` / `_recvHandleFromUnixSocket`
-- `nativeWaitFence` — `sync_wait()` from `<sync/sync.h>`, closes the fd regardless of outcome
-
-All functions return sentinel values (0 for pointers, -1 for fds) on failure and log with tag `"AHB_Bridge"`. The `sync` library was added to `target_link_libraries` in `CMakeLists.txt`.
-
-### `vulkan_ahb.c` / `vulkan_ahb.h` (Wine WSI) ✅ Complete
-
-Implements the Vulkan WSI inside the Wine process. The key structures are `wine_vk_surface` (holds the socket fd and dimensions) and `wine_vk_swapchain` (holds the per-slot `VkImage`, `VkDeviceMemory`, `AHardwareBuffer*`, reuse fence, and release fence).
-
-The IPC protocol uses four fixed-size message types over a Unix socket with `SCM_RIGHTS` ancillary data for fd passing:
-- `MSG_BUFFER` (3): Android → Wine, sends an AHB handle at swapchain creation
-- `MSG_REQUEST` (4): Wine → Android, requests a buffer slot
-- `MSG_PRESENT` (1): Wine → Android, sends slot index + acquire fence fd
-- `MSG_RELEASE` (2): Android → Wine, sends slot index + release fence fd
-
-Surface capabilities report `minImageCount=2`, `maxImageCount=3`, and exactly one format: `VK_FORMAT_R8G8B8A8_UNORM / VK_COLOR_SPACE_SRGB_NONLINEAR_KHR`. If `VK_ANDROID_external_memory_android_hardware_buffer` is absent, the surface returns `VK_ERROR_SURFACE_LOST_KHR` and Wine falls back to the X11 path.
-
-A deliberate design decision: AHBs are **not** released in `wine_ahb_destroy_swapchain`. The Android-side pool owns the buffer lifetime. Wine only holds a reference via `recvHandleFromUnixSocket`. Releasing on the Wine side would decrement the refcount while the Android present-receiver thread might still be using the buffer.
-
-### `ahb_preload.c` (LD_PRELOAD interceptor) ✅ Complete
-
-Loaded via `LD_PRELOAD` before any other library. Intercepts `vkCreateDevice`, `vkCreateSwapchainKHR`, `vkAcquireNextImageKHR`, `vkGetSwapchainImagesKHR`, `vkQueuePresentKHR`, and `vkGetDeviceProcAddr` at the dynamic linker level using `RTLD_NEXT`.
-
-Connection to the AHB server is deferred to the first `vkCreateDevice` call. This is intentional: Wine helper processes (wineserver, services.exe, etc.) never call `vkCreateDevice`, so they never connect to the socket and never disrupt the present receiver thread.
-
-On connection, the interceptor pre-receives 3 `AHardwareBuffer` handles from the Android app. At swapchain creation time, it imports these directly into Vulkan via `import_ahb_to_vk_image` rather than going through the socket request/receive cycle again.
-
-The dispatch table patching in `vkCreateDevice` is the most fragile part: it scans the first 32 entries of the VkDevice dispatch table looking for the real `vkGetDeviceProcAddr` pointer and replaces it with the wrapper. This ensures DXVK's internal `vkGetDeviceProcAddr` calls still hit the interceptor even when Wine resolves functions through the device vtable rather than through `LD_PRELOAD`.
-
-### `ahb_icd_wrapper.c` (ICD wrapper) ✅ Complete
-
-A complementary strategy that replaces `libvulkan_wrapper.so` entirely. Exports `vk_icdGetInstanceProcAddr` and patches the VkInstance dispatch table at creation time. This is the more robust primary path; the LD_PRELOAD interceptor is the fallback for cases where dispatch table patching fails.
-
-### `VulkanRendererContext.cpp` (Android-side C++) ⚠️ Partially Complete
-
-The core infrastructure is present:
-- `scanoutSetBuffer` signature extended to accept `int acquireFenceFd`
-- `pollReleaseFence()` method added to drain the release fence queue
-- `directFrameCount` atomic counter added
-- `releaseQueue` ring buffer with `releaseMutex` for async release fence delivery
-
-What's incomplete: the `ASurfaceTransaction_setOnComplete` callback registration needs verification, and the Java-side polling of `nativePollReleaseFence()` after each `nativeScanoutSetBuffer` call needs to be wired up.
-
-### `DirectCompositorComponent.java` ✅ Complete (per tasks)
-
-The `EnvironmentComponent` wrapper that owns the pool lifecycle. Critically, it has zero imports from `com.winlator.cmod.xserver.*`, which is the Phase 4 deletion readiness requirement. `start()` checks API level ≥ 26, allocates the pool, calls `pool.init()`, and activates `nativeMode` on the renderer. `stop()` reverses this in order.
-
-### `VulkanRenderer.java` ✅ Complete (per tasks)
-
-`setGraphicsDriver()` activates `nativeMode` for `"dxvk"` and `"vkd3d"` drivers (case-insensitive) and guards against API < 26. The first-frame transition (`!wasDelivered && delivered`) logs the observability message and calls `xServer.setRenderingEnabled(false)`. The HUD wiring via `hudRef.setIsNative(boolean)` was already in place.
+**SurfaceFlinger** — Receives the AHB directly via `ASurfaceTransaction_setBuffer`,
+waits on the acquire `sync_fd` (the blit's completion fence), and scans
+out. Fires the `onComplete` callback which drives the release chain.
 
 ---
 
-## IPC Protocol Detail
+## Approaches tried — what worked and what didn't
+
+### Interception mechanism (3 attempts; only one survived)
+
+| Approach | Outcome | Why |
+|---|---|---|
+| **LD_PRELOAD interceptor** (`ahb_preload.c`) | Abandoned | Worked for `vkCreateInstance`/`vkCreateDevice` via `RTLD_NEXT`, but Wine's `winevulkan` caches device-level function pointers in its own dispatch table, bypassing the `dlsym` chain. Couldn't reliably intercept `vkCreateSwapchainKHR` etc. for all games. |
+| **ICD wrapper** (`ahb_icd_wrapper.c`) | Abandoned | Replaced `libvulkan_wrapper.so` entirely and patched the `VkInstance` dispatch at creation. Worked more reliably than LD_PRELOAD but still missed core functions cached by Wine's thunks. Higher risk of breaking other Vulkan users in the Wine process. |
+| **Vulkan implicit layer** (`ahb_layer.c`) | **In production** | A proper Vulkan layer, loaded by the loader via `VK_INSTANCE_LAYERS=VK_LAYER_WINLATOR_ahb_direct`. Reliably intercepts all instance/device/swapchain extension functions. Core functions (e.g., `vkQueueSubmit`) still bypass us, but that turned out not to matter for the actual pipeline. |
+
+The other two interceptors are now dead code. The `ahb_preload.c` and
+`ahb_icd_wrapper.c` source files and their `.so` outputs can be deleted.
+`GuestProgramLauncherComponent.java` still has a vestigial
+`LD_PRELOAD += libahb_preload.so` conditional, but the `.so` is never
+deployed, so it's a no-op.
+
+### "Trojan" swapchain pattern
+
+DXVK needs a valid `VkSwapchainKHR` handle that Vulkan validation accepts
+and that Wine's thunks recognize. So `layer_CreateSwapchainKHR` creates a
+**real** swapchain via the real driver (the "trojan") and returns its
+handle to DXVK. But the trojan's images are never actually presented —
+DXVK renders into them, we blit out to AHBs, and the trojan swapchain's
+state machine is effectively ignored.
+
+**What worked:** Returning the trojan handle satisfies DXVK and Wine.
+DXVK renders into the trojan's `VkImage`s (which are real device-local
+images bound to whatever surface Wine created), and we use those as the
+source for our blit.
+
+**What didn't:** An early version overrode the trojan's `presentMode` to
+`MAILBOX` regardless of DXVK's request (with a fallback to `IMMEDIATE`),
+on the theory that the trojan shouldn't block on vsync. This produced no
+benefit — we never call `vkAcquireNextImageKHR` on the trojan — and the
+theoretical concern was about a state difference between what DXVK
+believed the swapchain to be (FIFO) and what the underlying driver had
+(MAILBOX). After ruling out several other freeze causes we reverted to
+honoring DXVK's requested mode and creating the trojan with whatever
+DXVK asked for. No behavioral change observed.
+
+### Blit-to-AHB indirection
+
+The first version of `layer_QueuePresentKHR` was missing the actual blit —
+the IPC plumbing was complete but no `vkCmdCopyImage` was recorded.
+Adding `vkCmdCopyImage` made games run, but with **red and blue swapped**:
+DXVK renders into a `B8G8R8A8_UNORM` image, and `vkCmdCopyImage` is a
+byte-level memcpy. The AHB's native HAL format is `RGBA_8888`, so
+SurfaceFlinger interpreted the bytes in the wrong channel order.
+
+**The fix that worked:** Change the AHB-side `VkImage` import format to
+`VK_FORMAT_R8G8B8A8_UNORM` (matching the AHB's native layout) and switch
+the blit from `vkCmdCopyImage` to `vkCmdBlitImage`. `BlitImage` is
+*format-aware* — it reads source pixels with BGRA semantics and writes
+destination pixels with RGBA semantics, performing the channel swap as
+a side effect of the format reinterpretation. Single-line change with a
+clean Vulkan-spec basis.
+
+### Per-slot blit resources and synchronization
+
+Initially the blit used a single command buffer + fence reused across all
+4 buffer slots. This caused Adreno driver timeouts at high frame rates
+when the GPU was still working on the previous blit. Switched to
+**per-slot command buffers and per-slot fences**, with each fence created
+with `VkExportFenceCreateInfo` for `SYNC_FD_BIT` export. The blit submit
+waits on DXVK's render-complete semaphores (forwarded from
+`pPresentInfo->pWaitSemaphores`) so the copy doesn't start until DXVK's
+writes are done. `wine_ahb_queue_present` exports the fence as a sync_fd
+and ships it to Android via `SCM_RIGHTS`, where `ASurfaceTransaction_setBuffer`
+takes ownership and gates SurfaceFlinger's scan-out on it.
+
+### `VK_KHR_external_fence_fd` extension injection
+
+Required for `vkGetFenceFdKHR` to succeed. DXVK doesn't always request
+this extension on its own (it does for some games, not others), so the
+layer injects it into the device's extension list inside `layer_CreateDevice`
+if it isn't already present. Without this injection, every present
+shipped to Android with `acquireFd=-1` (no sync_fd), which sometimes
+worked by luck and sometimes caused tearing / cmd_buffer reuse races.
+
+### The freeze at frame 3 (Vampire Survivors, Hollow Knight, GTA4)
+
+For weeks, FIFO-mode games froze after a few frames while IMMEDIATE-mode
+games (Broforce) worked. Theories that **did not** pan out:
+
+- **Acquire semaphore wasn't signaled** — we signal it via an empty
+  queue submit; verified working.
+- **MAILBOX-override on the trojan confusing DXVK** — reverted; didn't
+  change behavior.
+- **FIFO-specific acquire-pacing missing** — added strict
+  back-pressure that blocks acquire when `frames_in_flight >= image_count - 1`
+  for FIFO games. Doesn't fix the freeze (the freeze happens at frame 3,
+  before the pacing logic engages), but is correct behavior to keep.
+- **Patching the dispatch table for `vkQueueSubmit`** — wanted to log
+  every submit to see if DXVK was stuck before or after submission. The
+  dispatch-table scan never finds `vkQueueSubmit` (Wine's `winevulkan`
+  stores it in a different structure than our 512-entry scan reaches),
+  so we have no layer-side visibility into core function calls.
+
+**What actually found the bug:** Enabling DXVK's own log via
+`DXVK_LOG_LEVEL=info` + `DXVK_LOG_PATH` (pointed at a Wine-writable
+location inside the imagefs, since `/data/local/tmp` is blocked by
+SELinux for app processes). The log revealed:
 
 ```
-Wine Process                          Android App
-─────────────────────────────────────────────────────────────────
-
-[swapchain creation]
-  ← MSG_BUFFER{slot=0, AHB handle via SCM_RIGHTS}
-  ← MSG_BUFFER{slot=1, AHB handle via SCM_RIGHTS}
-  ← MSG_BUFFER{slot=2, AHB handle via SCM_RIGHTS}
-
-[each frame]
-  vkQueuePresentKHR(slot)
-  vkGetFenceFdKHR → acquire_fd
-  → MSG_PRESENT{slot, acquire_fd via SCM_RIGHTS, dst_x,y,w,h}
-
-                                      recv MSG_PRESENT
-                                      ASurfaceTransaction_setBuffer(ahb, acquire_fd)
-                                      ASurfaceTransaction_apply()
-                                      [SurfaceFlinger scans out]
-                                      onComplete callback → release_fd
-                                      ← MSG_RELEASE{slot, release_fd via SCM_RIGHTS}
-
-  recv MSG_RELEASE
-  vkImportFenceFdKHR(reuse_fence, release_fd)
-  [next frame] vkWaitForFences(reuse_fence)
-  vkQueueSubmit(render into slot)
+VK_KHR_present_wait
+    presentWait                            : 1
 ```
 
-File descriptors are passed as `SCM_RIGHTS` ancillary data in `sendmsg`/`recvmsg`. The acquire fence ownership transfers to the NDK (`ASurfaceTransaction_setBuffer` takes it). The release fence ownership transfers to the pool's background fence-waiter thread, which closes it after `sync_wait`.
+DXVK had enabled `VK_KHR_present_wait` for FIFO swapchains and was
+calling `vkWaitForPresentKHR(presentId=N, timeout=∞)` after every
+present to wait for the frame to be observable on the display. Our
+pipeline bypasses the real `vkQueuePresentKHR`, so the trojan
+swapchain's presentId was never signaled, and DXVK waited forever.
+
+**The fix:** Intercept `vkWaitForPresentKHR` in the layer and return
+`VK_SUCCESS` immediately for the trojan swapchain. Semantically correct
+— the present really did happen, just through the DAC path instead of
+the real swapchain. All FIFO games then progressed past frame 3.
+
+### Frame pacing — attempted real `vkWaitForPresentKHR` (reverted)
+
+After getting games to run, motion jitter remained. The hypothesis: our
+return-instant `vkWaitForPresentKHR` lets DXVK race ahead of vsync; if
+we made it actually wait for SurfaceFlinger's `onComplete`, DXVK would
+be paced to real display timing.
+
+Two attempts, both unsuccessful:
+
+**Attempt 1 — track `presentId` → slot via a ring buffer, mark the
+newest matching record completed on each `MSG_RELEASE`, advance
+`max_completed_present_id`, have `vkWaitForPresentKHR(N)` block on it.**
+This caused "time-travel" — enemies moving backward briefly during
+gameplay. Root cause: `MSG_RELEASE` doesn't carry a `presentId`, so the
+"mark newest matching slot as the completed presentId" guess advanced
+`max_completed_present_id` ahead of the actual displayed frame. DXVK
+saw multiple waits return at once, submitted bursts of frames, mailbox
+dropped them non-monotonically, and the game's dt-based physics
+mis-extrapolated.
+
+**Attempt 2 — extend the IPC protocol.** Added `present_id` to
+`MSG_PRESENT` (so the Wine side passes DXVK's `VkPresentIdKHR` through)
+and a `displayed` flag to `MSG_RELEASE` (1 for `onComplete`-driven
+releases, 0 for mailbox-drain drops). The layer's release-reader thread
+increments a `g_display_count` only on `displayed=1` releases. Required
+synchronized rebuilds of both `libahb_layer.so` and `libwinlator.so`.
+`vkWaitForPresentKHR` would then block until `display_count` advanced
+one tick.
+
+Result: framerate dropped to a hard 30 FPS, locked to a single slot
+(slot 3 in every present). Why:
+
+- DXVK's strict FIFO loop is **1-buffer-deep**: acquire → render →
+  present → wait → repeat.
+- SurfaceFlinger's `onComplete` fires ~1 vsync **after** apply (the
+  buffer is "displayed" only after being latched at the next vsync).
+- Each Wine iteration therefore takes ≥ 2 vsyncs: render + apply + 1
+  vsync of latency.
+- With 1-buffer cycling, only the most-recently-released slot is ever
+  free, so Wine reuses the same slot indefinitely. The pipelining that
+  FIFO normally allows (multiple frames in flight) never materializes.
+
+The real fix would have been to use `ASurfaceTransaction_setOnCommit`
+(API 31+, fires at apply rather than at display) to drive the
+`display_count` tick, decoupling pacing from the slot-release chain.
+This is a bigger Android-side change (new `MSG_TICK` message type,
+display thread needs new callback wiring) and wasn't undertaken.
+
+**Reverted** `vkWaitForPresentKHR` to instant-`VK_SUCCESS`. The IPC
+extensions (`present_id` field, `displayed` flag) are kept in the
+protocol because they're useful infrastructure for the future
+`setOnCommit` work — they just go unused at the moment.
+
+### Release-reader thread refactor (kept)
+
+Previously `layer_AcquireNextImageKHR` read `MSG_RELEASE` from the
+socket inline via `recv()`, both non-blocking (to drain) and blocking
+(when slots were exhausted). Adding `vkWaitForPresentKHR` interception
+would have created a race for the socket between two threads.
+
+The refactor: a dedicated release-reader thread is the sole consumer of
+the socket. It reads `MSG_RELEASE`, marks the slot free, optionally
+bumps `g_display_count`, and signals a condition variable. Both
+`layer_AcquireNextImageKHR` and (potentially) `layer_WaitForPresentKHR`
+wait on that cv.
+
+This is a strict architectural improvement (no socket contention,
+slots freed eagerly the moment they're released) and is kept even
+though the present-wait pacing wasn't ultimately enabled.
+
+### 120 Hz panel rate request
+
+Added `ASurfaceTransaction_setFrameRate(scanoutGameSC, 120.0f,
+FRAME_RATE_COMPATIBILITY_DEFAULT)` in `VulkanRendererContext::initScanout`.
+Whether this takes effect depends on the container's "Refresh Rate
+Limit" setting in the Winlator UI — the Java Activity sets
+`Window.preferredRefreshRate` from that container setting, and a value
+of 60 (the default) overrides our 120 request at the Window level. To
+get 120 Hz, the user must change the container's refresh-rate limit.
 
 ---
 
-## Fence Ownership Table
+## Current implementation
 
-| Fence | Created by | Consumed by | Closed by |
-|-------|-----------|-------------|-----------|
-| Acquire fd | Wine (`vkGetFenceFdKHR`) | NDK `ASurfaceTransaction_setBuffer` | NDK (takes ownership) |
-| Release fd | SurfaceFlinger (`onComplete`) | `pool.release(index, fd)` | Pool background thread after `sync_wait` |
-| Reuse VkFence | Wine WSI | `vkWaitForFences` before next render | Wine WSI at swapchain destroy |
+### Component summary
+
+```
+dlls/vulkan_layer/ahb_layer.c       — Vulkan implicit layer (THE active interceptor)
+dlls/vulkan_layer/ahb_layer.json    — layer manifest (loaded by Vulkan loader)
+dlls/vulkan_layer/VkLayer_ahb_direct.json  — alt manifest path
+
+dlls/wineandroid.drv/vulkan_ahb.c|h — Wine WSI: AHB import, present_msg IPC
+dlls/wineandroid.drv/vulkan.c       — Wine driver entry points (mostly unused
+                                       when layer is active; calls vulkan_ahb.c)
+
+app/src/main/cpp/winlator/vulkan_jni.cpp        — Android present-receiver +
+                                                   display thread (mailbox)
+app/src/main/cpp/winlator/VulkanRendererContext.cpp  — SurfaceControl scanout,
+                                                       blit→localAHB, onComplete
+                                                       release callback
+app/src/main/java/com/winlator/cmod/renderer/AHardwareBufferPool.java
+                                                — AHB allocator + release-fence
+                                                  background thread
+app/src/main/java/com/winlator/cmod/xenvironment/components/DirectCompositorComponent.java
+                                                — DAC lifecycle wrapper (init/
+                                                  shutdown the pool + receiver)
+app/src/main/java/com/winlator/cmod/renderer/VulkanRenderer.java
+                                                — Java side renderer + HUD wiring
+```
+
+Dormant / dead code that's still in the tree:
+
+```
+dlls/vulkan_layer/ahb_preload.c          — LD_PRELOAD interceptor, never loaded
+dlls/vulkan_layer/ahb_icd_wrapper.c      — ICD wrapper, never loaded
+dlls/vulkan_layer/libahb_preload.*.so    — build artifacts, never deployed
+dlls/vulkan_layer/libvulkan_wrapper_ahb.*.so  — build artifacts, never deployed
+GuestProgramLauncherComponent.java:381-386    — adds libahb_preload to
+                                                LD_PRELOAD if present (it's
+                                                not), so this is a no-op
+```
+
+### IPC protocol (Wine ↔ Android, Unix socket, SCM_RIGHTS for fds)
+
+```c
+struct present_msg {
+    uint8_t  type;          // MSG_PRESENT (1)
+    uint32_t slot_index;    // 0..AHB_MAX_IMAGES-1
+    int32_t  acquire_fd;    // blit completion sync_fd; -1 if none
+    int32_t  dst_x, dst_y, dst_w, dst_h;
+    uint64_t present_id;    // DXVK's VkPresentIdKHR; 0 if not provided
+                            // (carried for future setOnCommit pacing)
+};
+
+struct release_msg {
+    uint8_t  type;          // MSG_RELEASE (2)
+    uint32_t slot_index;
+    int32_t  release_fd;    // currently -1
+    uint8_t  displayed;     // 1 = onComplete (actual vsync tick)
+                            // 0 = mailbox drop (slot freed, not displayed)
+                            // (carried for future setOnCommit pacing)
+};
+```
+
+### Layer's intercepted functions
+
+```
+layer_CreateInstance / DestroyInstance          — chain through
+layer_CreateDevice / DestroyDevice              — chain through; inject
+                                                  VK_KHR_external_fence_fd;
+                                                  patch dispatch table for
+                                                  vkQueuePresentKHR + vkQueueSubmit
+                                                  (sometimes fails but layer
+                                                   chain still works for KHR funcs)
+layer_GetPhysicalDeviceSurface*KHR              — surface query passthrough
+layer_CreateSwapchainKHR                        — THE sniper hook: if request
+                                                  dimensions match the AHB pool,
+                                                  create a real "trojan" swapchain
+                                                  with DXVK's exact mode, import
+                                                  AHBs via vulkan_ahb.c, allocate
+                                                  per-slot blit resources
+layer_DestroySwapchainKHR                       — cleanup
+layer_GetSwapchainImagesKHR                     — return trojan VkImages (which
+                                                  DXVK renders into)
+layer_AcquireNextImageKHR                       — pick a free slot from g_slot_free
+                                                  (mailbox-style, blocking on cv
+                                                  when saturated; FIFO games
+                                                  enforce extra back-pressure)
+layer_QueuePresentKHR                           — extract presentId from pNext,
+                                                  blit trojan → AHB with channel
+                                                  swap (BlitImage, format-aware),
+                                                  submit blit on DXVK's queue
+                                                  waiting on its render-complete
+                                                  semaphore, send present_msg to
+                                                  Android with sync_fd
+layer_WaitForPresentKHR                         — returns VK_SUCCESS immediately
+                                                  for trojan swap (proper pacing
+                                                  would require setOnCommit work)
+layer_QueueSubmit                               — diagnostic wrapper; logs and
+                                                  forwards (dispatch-table patch
+                                                  for this fails, so DXVK's
+                                                  submits actually bypass us)
+```
+
+### Acquire-flow (mailbox-style with FIFO back-pressure)
+
+```
+pthread_mutex_lock(release_mtx)
+while (need_block):
+    cond_wait(release_cv)
+    recount free_count
+pick first-free slot not in g_presented_ring (recently-presented bias)
+mark slot busy
+pthread_mutex_unlock
+signal DXVK's acquire semaphore/fence via empty QueueSubmit on g_saved_queue
+
+need_block =
+    free_count == 0
+    OR (mode is FIFO AND s_acquire_counter > image_count
+        AND frames_in_flight >= image_count - 1)
+```
+
+### Present-flow
+
+```
+extract present_id from VkPresentIdKHR pNext
+wait/reset per-slot fence (slot N's previous blit must be done; release
+                           chain guarantees this — when slot N is reusable,
+                           SurfaceFlinger already consumed it)
+record blit command buffer:
+  barrier  trojan: PRESENT_SRC_KHR  → TRANSFER_SRC_OPTIMAL
+  barrier  AHB:    UNDEFINED        → TRANSFER_DST_OPTIMAL
+  vkCmdBlitImage trojan → AHB  (format-aware, R↔B handled implicitly)
+  barrier  trojan: TRANSFER_SRC_OPTIMAL → PRESENT_SRC_KHR (restore for DXVK)
+  barrier  AHB:    TRANSFER_DST_OPTIMAL → GENERAL          (for SF handoff)
+submit blit waiting on pPresentInfo->pWaitSemaphores, signaling fence
+update g_presented_ring (history of last 2 slots, used by acquire bias)
+wine_ahb_queue_present(swap, queue, slot, fence, presentId)
+    → exports fence as SYNC_FD via vkGetFenceFdKHR
+    → sends present_msg over socket with sync_fd as SCM_RIGHTS
+```
+
+### Release-reader thread (in `connect_ahb`)
+
+```
+loop:
+    recv(socket, &release_msg)
+    if MSG_RELEASE:
+        lock release_mtx
+        g_slot_free[slot] = true
+        if displayed: g_display_count++   (unused while WaitForPresent is no-op)
+        broadcast release_cv
+        unlock release_mtx
+```
+
+### Android-side present receiver (`vulkan_jni.cpp`)
+
+```
+loop:
+    recvmsg(socket, &present_msg, SCM_RIGHTS)
+    extract acquireFd from ancillary data
+    mailbox-drain: while more data pending:
+        recv next present_msg
+        send MSG_RELEASE for old slot with displayed=0
+        replace current with new
+    push latest slot to mailboxSlot (atomic exchange)
+```
+
+### Display thread
+
+```
+loop:
+    slot = mailboxSlot.exchange(-1)
+    if slot < 0: usleep(1ms); continue
+    if !scanoutInitialized: initScanout()  (lazy: SC layers + 120Hz request)
+    scanoutSetBuffer(ahb, acquireFd, slot)
+    applyScanoutBuffer():
+        ASurfaceTransaction_setBuffer(scanoutGameSC, ahb, acquireFd)
+        ASurfaceTransaction_setGeometry(...)
+        ASurfaceTransaction_setVisibility(SC, 1)
+        ASurfaceTransaction_setOnComplete(transaction, [](){
+            send MSG_RELEASE for prev_displayed_slot with displayed=1
+        })
+        ASurfaceTransaction_apply()
+```
 
 ---
 
-## Challenges and Walls Hit
+## Status: which games work
 
-### 1. Vulkan Dispatch Table Patching
+Tested on Odin 2 Portal, Android 13, Adreno 740, Proton 9.0, DXVK 2.x:
 
-**The problem**: Wine's Vulkan bridge calls `vk_icdGetInstanceProcAddr` only twice (for pre-instance functions), then resolves all subsequent functions through the VkInstance/VkDevice dispatch tables. This completely bypasses `LD_PRELOAD` for device-level calls. DXVK does the same — it caches function pointers at device creation time via `vkGetDeviceProcAddr`, so even if `LD_PRELOAD` intercepts the initial lookup, subsequent calls go directly through the cached pointer.
-
-**The solution**: Both interceptors patch the dispatch table in-place at `vkCreateDevice` time. The LD_PRELOAD interceptor scans the first 32 entries of the VkDevice dispatch table looking for the real `vkGetDeviceProcAddr` pointer and replaces it with the wrapper. The ICD wrapper patches the VkInstance dispatch table at creation time.
-
-**Remaining risk**: The scan-and-replace approach is fragile. If the dispatch table layout changes between Vulkan loader versions, or if the real function pointer appears at index > 32, the patch silently fails. The log message `"could not find vkGetDeviceProcAddr in dispatch table"` is the only signal. This is why both strategies coexist — if one fails, the other may succeed.
-
-### 2. Process Filtering (Wine Helper Processes)
-
-**The problem**: Wine spawns multiple helper processes (wineserver, services.exe, explorer.exe, etc.) that all inherit the `LD_PRELOAD` and `ANDROID_AHB_SERVER` environment variables. If any of them connect to the AHB socket, they disrupt the present receiver thread on the Android side, which expects exactly one connection from the game process.
-
-**The solution**: Connection is deferred to the first `vkCreateDevice` call. Helper processes never call `vkCreateDevice`, so they never connect. The process cmdline is logged on startup to make it visible which processes are loading the interceptor.
-
-**Remaining concern**: If a helper process somehow calls `vkCreateDevice` (e.g., a future Wine version adds GPU-accelerated compositing to explorer.exe), this filter breaks. A more robust approach would be to filter by process name or use a connection handshake that includes the process role.
-
-### 3. Release Fence Delivery Across Process Boundaries
-
-**The problem**: `ASurfaceTransaction_setOnComplete` fires on SurfaceFlinger's display thread inside the Android app process. The release fence fd must travel from that callback, through the Android app's JNI layer, across the Unix socket, into the Wine process, and be imported into Vulkan — all without blocking the Wine presentation thread or the SurfaceFlinger display thread.
-
-**The solution**: A non-blocking ring buffer (`releaseQueue`) in `VulkanRendererContext` is populated by the `onComplete` callback. The Java side polls `nativePollReleaseFence()` after each `nativeScanoutSetBuffer` call and forwards results to `pool.release(index, fd)`. The pool's background thread then waits on the fence without blocking anything critical.
-
-**Incomplete**: The wiring of `nativePollReleaseFence()` in `VulkanRenderer.java` after each `nativeScanoutSetBuffer` call needs verification. If this polling is not happening, release fences are never delivered back to Wine, the pool never marks slots as available, and `acquire()` will time out after 3 frames.
-
-### 4. AHB Ownership Across Swapchain Recreation
-
-**The problem**: DXVK destroys and recreates swapchains frequently — on window resize, fullscreen toggle, driver reset, and sometimes just during initialization. Each recreation would normally require new AHBs, but the pool has a fixed set. If Wine releases the AHB references on swapchain destroy, the pool's buffers become invalid.
-
-**The solution**: `wine_ahb_destroy_swapchain` explicitly does **not** call `AHardwareBuffer_release`. The comment in the code explains this: the AHB is owned by the Android-side pool. Wine received a handle via `recvHandleFromUnixSocket` which gives a reference, but releasing it would decrement the refcount and potentially invalidate the buffer while the Android present-receiver thread is still using it. The pool manages the full lifetime.
-
-**Implication**: On swapchain recreation, Wine must re-request the same AHB handles from the Android app via the socket. The pool sends the same buffer pointers (they haven't changed), and Wine re-imports them into new `VkImage` objects.
-
-### 5. API Level Fragmentation
-
-**The problem**: The feature requires three different API levels:
-- `AHardwareBuffer_allocate`: API 26+
-- `SurfaceControl` sibling layers: API 29+
-- `ASurfaceTransaction_setOnComplete`: API 29+
-- `ASurfaceTransaction_setOnCommit` (lower latency): API 31+
-
-The app's `minSdkVersion` is lower than 26, so none of these can be called unconditionally.
-
-**The solution**: All API 26+ code is guarded with `Build.VERSION.SDK_INT >= 26` checks. `ASurfaceTransaction` symbols are loaded dynamically via `dlopen`/`dlsym` in `VulkanRendererContext::loadScanoutApi()` — this was already in place before this feature. The NDK target API for `libwinlator.so` and `libvulkan_renderer.so` is set to 26. If the device is below API 26, `nativeMode` is permanently disabled with a one-time warning.
-
-### 6. No-Allocation Hot Path
-
-**The requirement**: No `new` in Java and no `malloc` in C on the path from `vkQueuePresentKHR` to `ASurfaceTransaction_apply`.
-
-**The approach**: The pool pre-allocates everything at `init()` time. The `releaseQueue` is a bounded vector pre-sized to the pool count. The fence-waiter thread pool is a cached executor (threads are reused, not created per release). The socket messages are fixed-size structs on the stack.
-
-**The gap**: The `fenceWaiter.submit(lambda)` call in `AHardwareBufferPool.release()` allocates a `Runnable` lambda object on the Java heap. This is technically an allocation on the release path, though not on the acquire/present hot path. Whether this matters in practice depends on GC pressure.
-
-### 7. Two Interceptor Strategies Coexisting
-
-**The problem**: It's not clear which interception strategy will work reliably across all Wine/DXVK/driver combinations. The LD_PRELOAD approach is simpler but can be bypassed by dispatch table caching. The ICD wrapper approach is more robust but requires replacing `libvulkan_wrapper.so` entirely, which may break other Vulkan users in the Wine process.
-
-**The current state**: Both strategies are implemented and coexist. The ICD wrapper (`ahb_icd_wrapper.c`) is the primary path; the LD_PRELOAD interceptor (`ahb_preload.c`) is the fallback. This adds complexity — there are now two code paths that must be kept in sync, and it's not always clear which one is active at runtime.
-
-**The unresolved question**: In production, which one actually intercepts DXVK's swapchain calls? The diagnostic logging (process cmdline, GIPA call log, swapchain creation log) is designed to answer this, but it hasn't been exercised end-to-end yet.
+| Game | Mode | Status |
+|---|---|---|
+| Broforce | IMMEDIATE | ✅ runs, 60 FPS, some motion jitter |
+| Vampire Survivors | FIFO | ✅ runs (after present_wait fix), some jitter |
+| Hollow Knight | FIFO | ✅ runs (after present_wait fix) |
+| GTA4 | FIFO | ✅ runs (after present_wait fix) |
+| Megabonk | FIFO | ✅ runs (after present_wait fix) |
 
 ---
 
-## What's Complete vs. What's Not
+## Known issues / future work
 
-### Fully Implemented
-- `AHardwareBufferPool.java` with property-based tests (jqwik)
-- `ahb_bridge.c` JNI bridge
-- `vulkan_ahb.c` / `vulkan_ahb.h` Wine WSI
-- `ahb_preload.c` LD_PRELOAD interceptor
-- `ahb_icd_wrapper.c` ICD wrapper
-- `DirectCompositorComponent.java` lifecycle wrapper
-- `VulkanRenderer.java` path selection and observability logging
-- Build system changes (`CMakeLists.txt`, `sync` library link)
-- Integration wiring into `XEnvironment` / `GuestProgramLauncherComponent`
+1. **Frame pacing jitter.** Visible motion irregularity especially during
+   character movement. Root cause: DXVK renders at variable speed (15–30
+   ms per frame from box64 + shader compile overhead), `vkWaitForPresentKHR`
+   returns instantly so DXVK doesn't pace itself, and the DAC path has
+   no compositor-side smoothing (which the X11 path provided as a side
+   effect of its extra latency). The architecturally correct fix is to
+   drive `g_display_count` from `ASurfaceTransaction_setOnCommit` (API
+   31+) and have `vkWaitForPresentKHR` wait on it. Requires:
+   - New `MSG_TICK` IPC message type
+   - Display thread registers `setOnCommit` callback that sends `MSG_TICK`
+   - Release-reader thread treats `MSG_TICK` as the pacing signal
+   - `layer_WaitForPresentKHR` waits on `g_display_count`
 
-### Partially Implemented
-- `VulkanRendererContext.cpp`: acquire fence parameter and release fence queue are present, but the `ASurfaceTransaction_setOnComplete` callback registration and the Java-side `nativePollReleaseFence()` polling loop need verification
-- Several property tests marked `*` (optional) are not yet written: Properties 4, 5, 7, 8, 9, 10, 11, 12, 14
+2. **HUD FPS counter shows 0 under DAC.** `directFrameCount` in
+   `VulkanRendererContext` ticks per frame, but `WinlatorHUD.onFrame()`
+   is only called from the X server's window-update path which is
+   disabled once DAC takes over. Fix: add a periodic Java poller that
+   reads the native counter and calls `hud.onFrame()` for each delta.
 
-### Not Yet Exercised End-to-End
-- The full frame delivery pipeline (Wine WSI → AHB pool → SurfaceControl → SurfaceFlinger) has not been run on a real device
-- Cursor compositing on the direct path
-- Pause/resume lifecycle handling
-- Surface reconstruction after `onSurfaceDestroyed`/`onSurfaceCreated`
+3. **Dynamic AHB pool size.** The sniper hook only matches the AHB
+   pool's fixed 1280×720 dimensions. Games that switch resolution
+   mid-run fall back to passthrough (X11 path). Requires a new IPC
+   message asking Android to reallocate AHBs at the new size, plus
+   coordinated tear-down/rebuild of the layer's per-slot blit resources.
 
----
+4. **Dispatch table patching is unreliable.** Wine's `winevulkan`
+   stores device function pointers in a structure our 512-entry linear
+   scan doesn't reach, so the patch for `vkQueuePresentKHR` and
+   `vkQueueSubmit` always fails. The layer chain still intercepts KHR
+   extension functions (because they go through `vkGetDeviceProcAddr`),
+   but core functions like `vkQueueSubmit` are not intercepted. Not
+   currently blocking anything but limited diagnostic visibility.
 
-## Phase 4 Deletion Readiness
+5. **Dead code in tree.** `ahb_preload.c`, `ahb_icd_wrapper.c`, their
+   build outputs, and the conditional `LD_PRELOAD` injection in
+   `GuestProgramLauncherComponent.java` all reference an interception
+   path we no longer use. Safe to delete.
 
-A key architectural constraint is that the X server must be deletable in a future phase without touching the new components. This is enforced by:
-
-- `DirectCompositorComponent.java` has zero imports from `com.winlator.cmod.xserver.*`
-- `AHardwareBufferPool.java` has zero imports from `com.winlator.cmod.xserver.*`
-- `ahb_bridge.c` has no dependency on X server headers
-- The path selection in `VulkanRenderer` is a simple string comparison on `graphicsDriver`, not a structural dependency on the X server
-
-When Phase 4 arrives, deleting `XServerComponent`, `GLRenderer`, `VirGLRendererComponent`, and the `com.winlator.cmod.xserver.*` package should not require changes to any of the new components.
-
----
-
-## Observability
-
-Log tags and key messages:
-
-| Tag | Message | Meaning |
-|-----|---------|---------|
-| `VulkanRenderer` | `nativeMode enabled, direct compositing path active` | Path activated for this session |
-| `VulkanRenderer` | `first scanout frame delivered` | First direct frame reached SurfaceFlinger |
-| `AHB_Pool` | `acquire: timeout after 16 ms, consecutiveDrops=N` | Frame budget exceeded, N frames dropped |
-| `AHB_ICD` | `vkCreateSwapchainKHR: AHB SWAPCHAIN CREATED!` | ICD wrapper intercepted swapchain creation |
-| `AHB_Preload` | `vkCreateSwapchainKHR: AHB SWAPCHAIN CREATED!` | LD_PRELOAD interceptor intercepted swapchain creation |
-| `Wine_AHB_WSI` | `vkQueuePresentKHR: frame N presented` | Frame submitted from Wine side |
-| `AHB_Bridge` | (any error) | JNI bridge NDK call failed |
-
-The HUD indicator (`hudRef.setIsNative(boolean)`) shows per-frame whether the direct path or the X server path delivered the frame.
+6. **`VK_EXT_swapchain_maintenance1` and `VK_GOOGLE_display_timing`.**
+   DXVK enables these too (per the device-extensions list in its log).
+   If any DXVK code path calls `vkReleaseSwapchainImagesEXT` or
+   `vkGetPastPresentationTimingGOOGLE` on our trojan, similar
+   bypass-related hangs are possible. None observed yet; defensive
+   interception would follow the same pattern as `vkWaitForPresentKHR`
+   (return success / dummy data).
 
 ---
 
-## Summary
+## Key lesson
 
-The architecture is sound and the core components are well-designed. The zero-copy guarantee is real — no `AHardwareBuffer_lock` is called on the hot path, and `ASurfaceTransaction_setBuffer` passes the buffer directly to SurfaceFlinger. The fence synchronization model correctly handles the three-way coordination between GPU rendering (Wine), display scan-out (SurfaceFlinger), and buffer reuse (Wine again).
+When a Vulkan layer replaces the implementation of a swapchain extension
+function (here `vkQueuePresentKHR`), it must also handle every dependent
+function that the extension contract introduces. `VK_KHR_present_wait`
+defines `vkWaitForPresentKHR`; replacing present without also handling
+the wait broke FIFO games for weeks. The same pattern will recur for any
+future extension that creates an async "the present reached the display"
+expectation.
 
-The main open questions are operational rather than architectural:
-
-1. Does the dispatch table patching reliably intercept DXVK's swapchain calls in practice?
-2. Is the `nativePollReleaseFence()` polling loop actually wired up and draining the release queue?
-3. Does the full pipeline work end-to-end on a real device with a real DXVK game?
-
-These can only be answered by running it.
+The diagnostic that finally exposed this was DXVK's own `info`-level log,
+which listed the enabled extensions. Without it we'd still be guessing.
+For any future hang of this shape, enable `DXVK_LOG_LEVEL=info` first.

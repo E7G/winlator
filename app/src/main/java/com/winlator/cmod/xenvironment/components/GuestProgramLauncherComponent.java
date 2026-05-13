@@ -378,12 +378,11 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         envVars.put("FAKE_EVDEV_DIR", devInputDir.getAbsolutePath());
         envVars.put("FAKE_EVDEV_VIBRATION", "1");
 
-        // Add AHB preload interceptor for direct compositing
-        File ahbPreload = new File(imageFs.getLibDir(), "libahb_preload.so");
-        if (ahbPreload.exists()) {
-            if (!ld_preload.isEmpty()) ld_preload += ":";
-            ld_preload += ahbPreload.getAbsolutePath();
-        }
+        // Direct Android Compositing is loaded as a Vulkan implicit layer
+        // (libahb_layer.so / ahb_layer.json), not via LD_PRELOAD. The legacy
+        // LD_PRELOAD interceptor (libahb_preload.so) was abandoned because
+        // Wine's winevulkan caches function pointers and bypasses RTLD_NEXT
+        // for device-level Vulkan calls.
 
         Log.d("GuestLauncher", "Final LD_PRELOAD: " + ld_preload);
         envVars.put("LD_PRELOAD", ld_preload);

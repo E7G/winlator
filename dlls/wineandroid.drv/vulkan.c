@@ -201,5 +201,7 @@ VkResult wine_vulkan_queue_present(struct wine_vk_swapchain *swapchain,
                                    VkQueue queue, uint32_t image_index,
                                    VkFence render_fence)
 {
-    return wine_ahb_queue_present(swapchain, queue, image_index, render_fence);
+    /* present_id=0 — this path doesn't know about DXVK's VkPresentIdKHR.
+     * Only the layer's intercepted vkQueuePresentKHR extracts the real id. */
+    return wine_ahb_queue_present(swapchain, queue, image_index, render_fence, 0);
 }

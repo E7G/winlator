@@ -18,7 +18,7 @@
 #define PRESENT_LOGI(...) __android_log_print(ANDROID_LOG_INFO, PRESENT_LOG_TAG, __VA_ARGS__)
 #define PRESENT_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, PRESENT_LOG_TAG, __VA_ARGS__)
 
-/* Must match vulkan_ahb.h on the Wine side */
+/* Must match vulkan_ahb.h on the Wine side — protocol break if layouts diverge. */
 #define MSG_PRESENT 1
 #define MSG_RELEASE 2
 
@@ -27,12 +27,14 @@ struct present_msg {
     uint32_t slot_index;
     int32_t  acquire_fd;
     int32_t  dst_x, dst_y, dst_w, dst_h;
+    uint64_t present_id;   /* DXVK's VkPresentIdKHR.pPresentIds[i]; 0 if none */
 };
 
 struct release_msg {
     uint8_t  type;         /* MSG_RELEASE */
     uint32_t slot_index;
     int32_t  release_fd;   /* -1 for now */
+    uint8_t  displayed;    /* 1 = onComplete (frame shown), 0 = mailbox drop */
 };
 
 /* State for the native present-receiver thread */
@@ -185,6 +187,19 @@ static void* present_receiver_thread(void* arg) {
                 ssize_t next_ret = recvmsg(state->clientFd, &next_msg, MSG_DONTWAIT);
                 if (next_ret == (ssize_t)sizeof(next_pmsg) && next_pmsg.type == MSG_PRESENT
                     && next_pmsg.slot_index < (uint32_t)state->slotCount) {
+                    /* MAILBOX DROP: this frame is being skipped in favor of a newer one.
+                     * Send MSG_RELEASE for the dropped slot immediately so Wine can reuse
+                     * it. displayed=0 tells the layer this release was a drop, not an
+                     * actual display tick — the layer must NOT advance its vsync-paced
+                     * display counter (used for vkWaitForPresentKHR). */
+                    {
+                        struct release_msg drop_rel;
+                        drop_rel.type = MSG_RELEASE;
+                        drop_rel.slot_index = slot;
+                        drop_rel.release_fd = -1;
+                        drop_rel.displayed = 0;
+                        send(state->clientFd, &drop_rel, sizeof(drop_rel), MSG_NOSIGNAL);
+                    }
                     /* Drop the old frame, use this newer one */
                     if (acquireFd >= 0) close(acquireFd);
                     slot = next_pmsg.slot_index;
@@ -209,18 +224,13 @@ static void* present_receiver_thread(void* arg) {
             }
         }
 
-        /* Push to mailbox for display thread (never blocks) */
+        /* Push the LATEST slot to the mailbox for the display thread. With true
+         * mailbox semantics, Wine renders unthrottled up to the pool capacity; the
+         * drain loop above sends immediate releases for skipped frames, and the
+         * onComplete callback in applyScanoutBuffer sends the release for the
+         * actually-displayed frame at vsync. The natural back-pressure is Wine
+         * waiting for the pool to refill, not for vsync. */
         state->mailboxSlot.store((int)slot, std::memory_order_release);
-
-        /* Send immediate MSG_RELEASE for the previous slot so Wine can reuse it.
-         * The display thread handles the actual (blocking) scanoutSetBuffer call. */
-        if (state->prevSlotForRelease >= 0) {
-            struct release_msg rel_msg;
-            rel_msg.type = 2; /* MSG_RELEASE */
-            rel_msg.slot_index = (uint32_t)state->prevSlotForRelease;
-            rel_msg.release_fd = -1;
-            send(state->clientFd, &rel_msg, sizeof(rel_msg), MSG_NOSIGNAL);
-        }
         state->prevSlotForRelease = (int)slot;
     }
 
