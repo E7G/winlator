@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <unistd.h>
+#include <sys/socket.h>
 #include <dlfcn.h>
 #include "window_vert.h"
 #include "window_frag.h"
@@ -1170,6 +1172,7 @@ typedef void  (*pfn_STSetZOrder)(void*, void*, int32_t);
 typedef void  (*pfn_STSetVisibility)(void*, void*, int8_t);
 typedef void  (*pfn_STSetGeometry)(void*, void*, const ARect*, const ARect*, int32_t);
 typedef void  (*pfn_STSetBackPressure)(void*, void*, bool);
+typedef void  (*pfn_STSetOnComplete)(void*, void*, void (*)(void*, void*));
 
 bool VulkanRendererContext::loadScanoutApi() {
     if (scanoutApiLoaded) return fnSCCreateFromWin != nullptr;
@@ -1191,6 +1194,8 @@ bool VulkanRendererContext::loadScanoutApi() {
     fnSTSetVisibility = dlsym(lib, "ASurfaceTransaction_setVisibility");
     fnSTSetGeometry      = dlsym(lib, "ASurfaceTransaction_setGeometry");
     fnSTSetBackPressure  = dlsym(lib, "ASurfaceTransaction_setEnableBackPressure");
+    fnSTSetOnComplete    = dlsym(lib, "ASurfaceTransaction_setOnComplete");
+    fnSTSetFrameRate     = dlsym(lib, "ASurfaceTransaction_setFrameRate"); /* API 30+; may be NULL on older Android */
 
     bool coreOk = fnSCCreateFromWin && fnSCRelease &&
                   fnSTCreate && fnSTDelete && fnSTApply &&
@@ -1202,6 +1207,8 @@ bool VulkanRendererContext::loadScanoutApi() {
         return false;
     }
     if (!fnSTSetZOrder) SCANOUT_LOG("loadScanoutApi: setZOrder unavailable (non-critical)");
+    SCANOUT_LOG("loadScanoutApi: setFrameRate %s (needed for >60Hz refresh)",
+        fnSTSetFrameRate ? "available" : "NOT AVAILABLE (Android < 11?)");
     const char* gpuBlitEnv = std::getenv("WINLATOR_SCANOUT_GPU_BLIT");
     scanoutEnvGpuBlit = (!gpuBlitEnv || gpuBlitEnv[0] == '1');
     scanoutAlwaysGpuBlit = scanoutEnvGpuBlit || swapRB;
@@ -1243,6 +1250,18 @@ void VulkanRendererContext::initScanout() {
     ST_SETZORDER(t, scanoutCursorSC, 1);
     ST_SETVIS(t, scanoutGameSC,   0);
     ST_SETVIS(t, scanoutCursorSC, 0);
+
+    /* Request the panel's max refresh rate (e.g., 120 Hz on Odin 2 Portal).
+     * Compatibility=0 (DEFAULT) tells SurfaceFlinger to pick the nearest rate
+     * the panel actually supports. Without this, SurfaceFlinger defaults to
+     * 60 Hz which caps our onComplete-paced release chain at 60 fps. */
+    if (fnSTSetFrameRate) {
+        typedef void (*pfn_STSetFrameRate)(void*, void*, float, int8_t);
+        ((pfn_STSetFrameRate)fnSTSetFrameRate)(t, scanoutGameSC,   120.0f, 0);
+        ((pfn_STSetFrameRate)fnSTSetFrameRate)(t, scanoutCursorSC, 120.0f, 0);
+        SCANOUT_LOG("initScanout: requested 120 Hz frame rate on game/cursor SC");
+    }
+
     ST_APPLY(t);
     ST_DELETE(t);
 
@@ -1316,10 +1335,11 @@ void VulkanRendererContext::destroyScanout() {
     scanoutCursorBufW = scanoutCursorBufH = 0;
 }
 
-void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int x, int y, int w, int h) {
+void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFenceFd, int slotIndex, int x, int y, int w, int h) {
     if (!scanoutActive.load() || !scanoutGameSC || !ahb) {
         RLOG("scanoutSetBuffer: SKIPPED active=%d sc=%p ahb=%p",
             (int)scanoutActive.load(),scanoutGameSC,(void*)ahb);
+        if (acquireFenceFd >= 0) close(acquireFenceFd);
         return;
     }
     static int _scanoutBufCnt=0;
@@ -1332,12 +1352,12 @@ void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int x, int y,
             hasOverlay ? "YES" : "NO");
         scanoutNeedsGpuBlit = !hasOverlay;
     }
-    AHardwareBuffer_acquire(ahb);
+    // AHardwareBuffer_acquire removed: pool owns the ref, SurfaceFlinger manages its own
     { std::lock_guard<std::mutex> lk(scanoutMutex);
-      if (scanoutPendingDirty.load() && scanoutPending.ahb && scanoutPending.ahb != ahb) {
-          AHardwareBuffer_release(scanoutPending.ahb);
+      if (scanoutPendingDirty.load() && scanoutPending.acquireFenceFd >= 0) {
+          close(scanoutPending.acquireFenceFd);
       }
-      scanoutPending = {ahb, x, y, w, h};
+      scanoutPending = {ahb, acquireFenceFd, slotIndex, x, y, w, h};
       scanoutPendingDirty.store(true, std::memory_order_release); }
     needsRender.store(true, std::memory_order_release);
     dirtyCV.notify_one();
@@ -1498,9 +1518,14 @@ void VulkanRendererContext::applyScanoutBuffer() {
     { std::lock_guard<std::mutex> lk(scanoutMutex);
       if (!scanoutPendingDirty.load()) return;
       p = scanoutPending;
+      scanoutPending.acquireFenceFd = -1; // ownership transferred to p
       scanoutPendingDirty.store(false, std::memory_order_relaxed); }
     AHardwareBuffer* ahb=p.ahb; int w=p.w, h=p.h; (void)p.x; (void)p.y;
-    if (!ahb || !scanoutGameSC) return;
+    int acquireFd = p.acquireFenceFd;
+    if (!ahb || !scanoutGameSC) {
+        if (acquireFd >= 0) close(acquireFd);
+        return;
+    }
 
     int32_t cw = containerWidth  > 0 ? containerWidth  : w;
     int32_t ch = containerHeight > 0 ? containerHeight : h;
@@ -1573,18 +1598,59 @@ void VulkanRendererContext::applyScanoutBuffer() {
     }
 
     void* t=ST_CREATE();
-    ST_SETBUF(t,scanoutGameSC,presentAhb,-1);
+    ST_SETBUF(t,scanoutGameSC,presentAhb,acquireFd);
     ST_SETGEO(t,scanoutGameSC,&src,&dst,0);
     ST_SETVIS(t,scanoutGameSC,1);
     ST_SETBP(t,scanoutGameSC,false);
+
+    // Register onComplete callback to send MSG_RELEASE for the PREVIOUS buffer.
+    // When this transaction completes, SurfaceFlinger releases the previously-displayed buffer.
+    static int scanoutPrevDisplayedSlot = -1;
+    if (fnSTSetOnComplete && scanoutPrevDisplayedSlot >= 0) {
+        struct OnCompleteCtx {
+            int socketFd;
+            int slotIndex;
+        };
+        int sockFd = scanoutSocketFd.load(std::memory_order_relaxed);
+        if (sockFd >= 0) {
+            auto* ctx = new OnCompleteCtx{sockFd, scanoutPrevDisplayedSlot};
+            ((pfn_STSetOnComplete)fnSTSetOnComplete)(t, (void*)ctx,
+                [](void* context, void* stats) {
+                    auto* c = reinterpret_cast<OnCompleteCtx*>(context);
+                    /* MSG_RELEASE with displayed=1 — this fires from
+                     * SurfaceFlinger's onComplete, meaning the previous slot's
+                     * buffer was actually scanned out. The layer uses
+                     * displayed=1 to advance its vsync-paced display counter
+                     * that drives vkWaitForPresentKHR. */
+                    struct { uint8_t type; uint32_t slot_index; int32_t release_fd; uint8_t displayed; } rel;
+                    rel.type = 2; // MSG_RELEASE
+                    rel.slot_index = (uint32_t)c->slotIndex;
+                    rel.release_fd = -1;
+                    rel.displayed = 1;  // onComplete = real vsync tick
+                    send(c->socketFd, &rel, sizeof(rel), MSG_NOSIGNAL);
+                    delete c;
+                });
+        }
+    }
+    scanoutPrevDisplayedSlot = p.slotIndex;
+
     ST_APPLY(t);
+    directFrameCount.fetch_add(1, std::memory_order_relaxed);
     gameFrameDelivered.store(true);
     ST_DELETE(t);
-    AHardwareBuffer_release(ahb);
+    // AHardwareBuffer_release removed: no matching acquire, pool owns the ref
 }
 
 void VulkanRendererContext::scanoutSetDst(int x, int y, int w, int h) {
     scanoutDstX=x; scanoutDstY=y; scanoutDstW=w; scanoutDstH=h;
+}
+
+std::pair<int,int> VulkanRendererContext::pollReleaseFence() {
+    std::lock_guard<std::mutex> lk(releaseMutex);
+    if (releaseQueue.empty()) return {-1, -1};
+    auto front = releaseQueue.front();
+    releaseQueue.erase(releaseQueue.begin());
+    return {front.slotIndex, front.releaseFd};
 }
 
 void VulkanRendererContext::scanoutSetCursorImage(void* pixels, short w, short h, short stride) {
@@ -1679,6 +1745,10 @@ void VulkanRendererContext::dumpRendererInfo() {
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
         "Scanout: active=%d gameFrameDelivered=%d scanoutGameSC=%p",
         (int)scanoutActive.load(),(int)gameFrameDelivered.load(),scanoutGameSC);
+    __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
+        "DirectCompositing: directFrameCount=%llu releaseQueueSize=%zu",
+        (unsigned long long)directFrameCount.load(),
+        [this]{ std::lock_guard<std::mutex> lk(releaseMutex); return releaseQueue.size(); }());
     __android_log_print(ANDROID_LOG_DEBUG,WLOG_TAG,
         "Surface: %dx%d container: %dx%d",
         surfaceWidth,surfaceHeight,containerWidth,containerHeight);

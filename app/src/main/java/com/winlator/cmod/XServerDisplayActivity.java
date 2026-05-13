@@ -90,7 +90,9 @@ import com.winlator.cmod.winhandler.WinHandler;
 import com.winlator.cmod.xconnector.UnixSocketConfig;
 import com.winlator.cmod.xenvironment.ImageFs;
 import com.winlator.cmod.xenvironment.XEnvironment;
+import com.winlator.cmod.xenvironment.components.AHBSocketServerComponent;
 import com.winlator.cmod.xenvironment.components.ALSAServerComponent;
+import com.winlator.cmod.xenvironment.components.DirectCompositorComponent;
 import com.winlator.cmod.xenvironment.components.GuestProgramLauncherComponent;
 import com.winlator.cmod.xenvironment.components.PulseAudioComponent;
 import com.winlator.cmod.xenvironment.components.SysVSharedMemoryComponent;
@@ -787,6 +789,13 @@ if (enableLogs) {
 
         environment = new XEnvironment(this, imageFs);
         environment.addComponent(new SysVSharedMemoryComponent(xServer, UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.SYSVSHM_SERVER_PATH)));
+        DirectCompositorComponent directCompositor = new DirectCompositorComponent(
+                xServerView.getRenderer(), 4,
+                xServer.screenInfo.width, xServer.screenInfo.height);
+        environment.addComponent(directCompositor);
+        environment.addComponent(new AHBSocketServerComponent(
+                UnixSocketConfig.createSocket(rootPath, AHBSocketServerComponent.AHB_SOCKET_PATH),
+                directCompositor));
         environment.addComponent(new XServerComponent(xServer, UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.XSERVER_PATH)));
 
         if (audioDriver.equals("alsa")) {
@@ -860,8 +869,7 @@ if (enableLogs) {
 
         if (shortcut != null) renderer.setUnviewableWMClasses("explorer.exe");
 
-        boolean isNative = false;
-        renderer.setNativeMode(isNative);
+        renderer.setGraphicsDriver(graphicsDriver);
 
         xServer.setRenderer(renderer);
         rootView.addView(xServerView);
