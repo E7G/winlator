@@ -78,6 +78,7 @@ struct VkTable {
     PFN_vkCmdSetScissor CmdSetScissor;
     PFN_vkCmdPipelineBarrier CmdPipelineBarrier;
     PFN_vkCmdCopyImage CmdCopyImage;
+    PFN_vkCmdBlitImage CmdBlitImage;
     PFN_vkCmdCopyBufferToImage CmdCopyBufferToImage;
     PFN_vkCreateSampler CreateSampler;
     PFN_vkDestroySampler DestroySampler;
@@ -141,7 +142,11 @@ public:
     void applyScanoutBuffer();
     void initScanoutFromWindows(ANativeWindow* gameWin, ANativeWindow* cursorWin);
     void scanoutSetDst(int x, int y, int w, int h);
-    void scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFenceFd, int slotIndex, int x, int y, int w, int h);
+    /* bgraBytes: 1 = source AHB has BGRA byte order, receiver swaps via
+     * format-aware vkCmdBlitImage in the local compositor blit. 0 = AHB
+     * already has RGBA bytes; plain CmdCopyImage. Set by the layer based
+     * on direct-render vs trojan-blit mode. */
+    void scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFenceFd, int slotIndex, int x, int y, int w, int h, int bgraBytes = 0);
     void scanoutSetCursorImage(void* pixels, short w, short h, short stride);
     void scanoutSetCursorPos(short x, short y, short hotX, short hotY);
     std::pair<int,int> pollReleaseFence();
@@ -246,6 +251,9 @@ private:
     VkDeviceMemory    scanoutLocalMem     = VK_NULL_HANDLE;
     int               scanoutLocalW       = 0;
     int               scanoutLocalH       = 0;
+    uint32_t          scanoutLocalAhbFormat = 0;  /* HAL pixel format the local AHB was allocated with;
+                                                  * reallocate if the requested format changes (e.g.
+                                                  * switching between trojan-blit RGBA and direct-render BGRA modes). */
     bool              scanoutNeedsGpuBlit = false;
     bool   scanoutApiLoaded   = false;
     bool   scanoutEnvGpuBlit  = false;
@@ -271,7 +279,7 @@ private:
     int32_t lastDstX=0, lastDstY=0, lastDstW=0, lastDstH=0;
     bool    gameScVisible      = false;
 
-    struct ScanoutPending { AHardwareBuffer* ahb=nullptr; int acquireFenceFd=-1; int slotIndex=-1; int x=0,y=0,w=0,h=0; };
+    struct ScanoutPending { AHardwareBuffer* ahb=nullptr; int acquireFenceFd=-1; int slotIndex=-1; int x=0,y=0,w=0,h=0; int bgraBytes=0; };
     std::mutex        scanoutMutex;
     ScanoutPending    scanoutPending{};
     std::atomic<bool> scanoutPendingDirty{false};
@@ -361,7 +369,11 @@ private:
     void cleanupSwapchain();
 
     bool  createWinTexResources(WinTex& wt, int w, int h);
-    bool  importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb);
+    /* overrideFormat: when not VK_FORMAT_UNDEFINED, forces the imported
+     * VkImage's format regardless of the swapRB heuristic. Used by the
+     * direct-render scanout path to import the source AHB as B8G8R8A8 so
+     * a subsequent vkCmdBlitImage performs an R↔B channel swap. */
+    bool  importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb, VkFormat overrideFormat = VK_FORMAT_UNDEFINED);
     bool  ensureScanoutLocalAhb(int w, int h, uint32_t ahbFormat);
     void  cleanupAllAHBCache();
     void  flushDeleteQueue();

@@ -104,6 +104,24 @@ static VkCommandBuffer           g_copy_cmd_bufs[AHB_MAX_IMAGES] = {VK_NULL_HAND
 static VkFence                   g_copy_fences[AHB_MAX_IMAGES] = {VK_NULL_HANDLE};
 static VkQueue                   g_saved_queue = VK_NULL_HANDLE;
 
+/* === DIRECT-RENDER MODE (Path 3) ===
+ *
+ * When enabled (env var WINLATOR_AHB_DIRECT_RENDER=1), DXVK renders DIRECTLY
+ * into the AHB-backed VkImages. The trojan swapchain + per-slot blit are
+ * skipped entirely. QueuePresentKHR submits a "fence-only signal" job (zero
+ * commands; waits on DXVK's render-complete semaphores, signals the per-slot
+ * fence) so we still get a SYNC_FD to ship to SurfaceFlinger as the acquire
+ * fence.
+ *
+ * Saved per frame: vkCmdBlitImage + 4 image-memory barriers + one
+ * BeginCommandBuffer/EndCommandBuffer + the trojan image allocation. The
+ * AHB write happens during DXVK's own draws (zero-copy from there to
+ * SurfaceFlinger).
+ *
+ * Defaults OFF — the trojan-blit path is the safe known-good. Toggle on
+ * after verifying. Set once at layer init by reading the env var. */
+static bool g_direct_render_mode = false;
+
 /* Per-slot mailbox state — true when the slot is available for DXVK to render.
  * Slots transition free→busy on acquire and busy→free on MSG_RELEASE recv. */
 static bool g_slot_free[AHB_MAX_IMAGES] = { true, true, true, true };
@@ -528,16 +546,19 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_GetPhysicalDeviceSurfaceFormatsKHR(
         return g_inst_dispatch.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, pSurfaceFormatCount, pSurfaceFormats);
     }
 
-    /* Report both RGBA8 and BGRA8 to satisfy DXVK which prefers BGRA8.
-     * AHB format AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM maps to VK_FORMAT_R8G8B8A8_UNORM
-     * but the Vulkan driver also accepts B8G8R8A8 for AHB import on most devices. */
+    /* Advertise BGRA first in both modes. DXVK's preferred swapchain
+     * format is B8G8R8A8_UNORM (matches DXGI_FORMAT_B8G8R8A8_UNORM, the
+     * standard DirectX swapchain format) and DXVK's own caching often
+     * bypasses our format restriction anyway. By aligning the AHB pool's
+     * HAL format to BGRA (P2 change), DXVK's preferred format also
+     * matches the AHB byte layout — no channel swap needed end-to-end. */
     static const VkSurfaceFormatKHR formats[] = {
         { VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
         { VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
         { VK_FORMAT_B8G8R8A8_SRGB,  VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
         { VK_FORMAT_R8G8B8A8_SRGB,  VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
     };
-    uint32_t count = sizeof(formats) / sizeof(formats[0]);
+    uint32_t count = (uint32_t)(sizeof(formats) / sizeof(formats[0]));
 
     if (!pSurfaceFormats) {
         *pSurfaceFormatCount = count;
@@ -694,10 +715,23 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
         sc->images[i].in_use = false;
     }
 
-    /* Import AHBs */
+    /* Import the AHB into Vulkan as B8G8R8A8_UNORM — matches the pool's
+     * HAL_PIXEL_FORMAT_BGRA_8888 backing (see AHardwareBufferPool.java).
+     *
+     * Both modes use the same import format:
+     *   - Direct-render: DXVK writes BGRA bytes directly into the AHB.
+     *     Memory bytes are BGRA, SurfaceFlinger reads HAL_BGRA → correct.
+     *   - Trojan-blit fallback: DXVK writes BGRA into the trojan (also
+     *     B8G8R8A8), then vkCmdBlitImage copies trojan → AHB. With both
+     *     ends labeled the same format, the blit degenerates to a byte
+     *     copy (no channel reinterpretation). AHB memory stays BGRA.
+     *
+     * The AHB's HAL format and the Vulkan import format MUST agree — if
+     * they disagree (e.g. HAL=BGRA + import=RGBA), pixels are read at
+     * wrong byte offsets, swapping R and B on display. */
     PFN_vkGetPhysicalDeviceMemoryProperties getMemProps = g_inst_dispatch.GetPhysicalDeviceMemoryProperties;
     for (uint32_t i = 0; i < sc->image_count; i++) {
-        VkResult ires = import_ahb_to_vk_image(sc, i, g_ahb_buffers[i], g_phys_device, getMemProps);
+        VkResult ires = import_ahb_to_vk_image(sc, i, g_ahb_buffers[i], g_phys_device, getMemProps, VK_FORMAT_B8G8R8A8_UNORM);
         if (ires != VK_SUCCESS) {
             LOGE("layer_CreateSwapchainKHR: import failed slot %u: %d", i, ires);
             for (uint32_t j = 0; j < i; j++) {
@@ -715,98 +749,145 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
 
     g_ahb_swapchain = sc;
 
-    /* === TROJAN HORSE: create a REAL swapchain for handle validity ===
-     *
-     * Pass DXVK's requested present mode through to the real swapchain UNCHANGED.
-     *
-     * Previously we forced MAILBOX here, on the theory that the trojan needed
-     * to "never block on acquire." But we never call vkAcquireNextImageKHR on
-     * the trojan — we have our own slot-picking logic — so the trojan's mode
-     * never affects our pacing. The override only caused DXVK's internal state
-     * (which believes the swapchain is FIFO when DXVK requested FIFO) to diverge
-     * from the real driver state (which thinks the swapchain is MAILBOX).
-     *
-     * That divergence appears to be why FIFO games (Vampire Survivors, Hollow
-     * Knight, GTA4) freeze at frame 3 — DXVK's render commands or fence-wait
-     * logic interrogates the real swapchain in some way that fails because
-     * MAILBOX semantics differ from the FIFO behavior DXVK expects. */
-    VkResult real_res = g_dev_dispatch.CreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
-    LOGI("layer_CreateSwapchainKHR: trojan created with DXVK's requested mode=%d, result=%d",
-         (int)pCreateInfo->presentMode, real_res);
-    if (real_res != VK_SUCCESS) {
-        LOGE("layer_CreateSwapchainKHR: real swapchain creation failed (%d), using AHB-only", real_res);
-        /* Fallback: return fake handle (may still fail with Wine thunks) */
+    if (g_direct_render_mode) {
+        /* === DIRECT-RENDER MODE (Path 3) ===
+         *
+         * No trojan swapchain. The AHB-backed VkImages are exposed to DXVK
+         * directly via vkGetSwapchainImagesKHR; DXVK renders straight into
+         * them. We still need per-slot fences (export-capable for SYNC_FD)
+         * because QueuePresentKHR submits a fence-only signal to convert
+         * DXVK's render-complete semaphores into a SYNC_FD for SurfaceFlinger.
+         *
+         * The "real" swapchain handle is the synthetic pointer to our
+         * wine_vk_swapchain struct — downstream code compares against
+         * g_real_swapchain_handle so any swapchain handle works as long as
+         * it's unique. */
         *pSwapchain = (VkSwapchainKHR)(uintptr_t)sc;
-    } else {
         g_real_swapchain_handle = *pSwapchain;
-        LOGI("layer_CreateSwapchainKHR: real swapchain handle=%p stored as trojan",
-             (void*)(uintptr_t)*pSwapchain);
+        g_trojan_image_count = 0;  /* signals "no trojan blit infrastructure" */
 
-        /* Get trojan swapchain images — these are regular device-local images
-         * (no AHB backing) that DXVK will render into safely. */
-        g_trojan_image_count = AHB_MAX_IMAGES;
-        VkResult img_res = g_dev_dispatch.GetSwapchainImagesKHR(
-            device, g_real_swapchain_handle, &g_trojan_image_count, g_trojan_images);
-        if (img_res != VK_SUCCESS && img_res != VK_INCOMPLETE) {
-            LOGE("layer_CreateSwapchainKHR: failed to get trojan images (%d)", img_res);
-            g_trojan_image_count = 0;
-        } else {
-            LOGI("layer_CreateSwapchainKHR: got %u trojan images for blit indirection",
-                 g_trojan_image_count);
-        }
-
-        /* Create command pool + per-slot command buffers + per-slot fences for blit.
-         * Per-slot resources eliminate the cross-frame fence reuse that was causing
-         * Adreno driver timeouts. Each ahb_slot owns its own (cmd_buf, fence) pair. */
-        if (g_trojan_image_count > 0 && !g_copy_cmd_pool) {
-            VkCommandPoolCreateInfo pool_ci = {
-                .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-                .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-                .queueFamilyIndex = 0, /* graphics queue family */
-            };
-            g_dev_dispatch.CreateCommandPool(device, &pool_ci, NULL, &g_copy_cmd_pool);
-
-            VkCommandBufferAllocateInfo alloc_ci = {
-                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                .commandPool = g_copy_cmd_pool,
-                .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                .commandBufferCount = g_trojan_image_count,
-            };
-            g_dev_dispatch.AllocateCommandBuffers(device, &alloc_ci, g_copy_cmd_bufs);
-
-            /* Create fences with SYNC_FD export capability so wine_ahb_queue_present
-             * can call vkGetFenceFdKHR(SYNC_FD_BIT) on them. */
-            VkExportFenceCreateInfo export_ci = {
-                .sType = VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO,
-                .pNext = NULL,
-                .handleTypes = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT,
-            };
-            VkFenceCreateInfo fence_ci = {
-                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-                .pNext = &export_ci,
-                /* Not signaled: vkGetFenceFdKHR(SYNC_FD) requires the fence to
-                 * have a pending signal operation OR be unsignaled. Initial
-                 * signaled state would force a wait+reset on first use. */
-                .flags = 0,
-            };
-            int created = 0;
-            for (uint32_t i = 0; i < g_trojan_image_count; i++) {
-                VkResult fres = g_dev_dispatch.CreateFence(device, &fence_ci, NULL, &g_copy_fences[i]);
-                if (fres != VK_SUCCESS) {
-                    LOGW("layer_CreateSwapchainKHR: exportable fence %u failed (%d), retrying plain", i, fres);
-                    VkFenceCreateInfo plain_ci = {
-                        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-                        .flags = 0,
-                    };
-                    g_dev_dispatch.CreateFence(device, &plain_ci, NULL, &g_copy_fences[i]);
-                } else {
-                    created++;
-                }
+        /* Create per-slot export-capable fences. Same layout as the trojan
+         * path's g_copy_fences but no command-buffer/pool overhead. */
+        VkExportFenceCreateInfo export_ci = {
+            .sType = VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO,
+            .pNext = NULL,
+            .handleTypes = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT,
+        };
+        VkFenceCreateInfo fence_ci = {
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .pNext = &export_ci,
+            .flags = 0,
+        };
+        int created = 0;
+        for (uint32_t i = 0; i < sc->image_count; i++) {
+            VkResult fres = g_dev_dispatch.CreateFence(device, &fence_ci, NULL, &g_copy_fences[i]);
+            if (fres != VK_SUCCESS) {
+                LOGW("layer_CreateSwapchainKHR: direct-render fence %u failed (%d), retrying plain", i, fres);
+                VkFenceCreateInfo plain_ci = {
+                    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                    .flags = 0,
+                };
+                g_dev_dispatch.CreateFence(device, &plain_ci, NULL, &g_copy_fences[i]);
+            } else {
+                created++;
             }
-            LOGI("layer_CreateSwapchainKHR: %u/%u exportable fences created",
-                 created, g_trojan_image_count);
-            LOGI("layer_CreateSwapchainKHR: per-slot blit resources created (pool=%p, %u cmd_bufs, %u fences)",
-                 (void*)g_copy_cmd_pool, g_trojan_image_count, g_trojan_image_count);
+        }
+        LOGI("layer_CreateSwapchainKHR: DIRECT-RENDER mode — synthetic swapchain handle=%p, %u/%u export fences",
+             (void*)(uintptr_t)*pSwapchain, created, sc->image_count);
+    } else {
+        /* === TROJAN HORSE: create a REAL swapchain for handle validity ===
+         *
+         * Pass DXVK's requested present mode through to the real swapchain UNCHANGED.
+         *
+         * Previously we forced MAILBOX here, on the theory that the trojan needed
+         * to "never block on acquire." But we never call vkAcquireNextImageKHR on
+         * the trojan — we have our own slot-picking logic — so the trojan's mode
+         * never affects our pacing. The override only caused DXVK's internal state
+         * (which believes the swapchain is FIFO when DXVK requested FIFO) to diverge
+         * from the real driver state (which thinks the swapchain is MAILBOX).
+         *
+         * That divergence appears to be why FIFO games (Vampire Survivors, Hollow
+         * Knight, GTA4) freeze at frame 3 — DXVK's render commands or fence-wait
+         * logic interrogates the real swapchain in some way that fails because
+         * MAILBOX semantics differ from the FIFO behavior DXVK expects. */
+        VkResult real_res = g_dev_dispatch.CreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
+        LOGI("layer_CreateSwapchainKHR: trojan created with DXVK's requested mode=%d, result=%d",
+             (int)pCreateInfo->presentMode, real_res);
+        if (real_res != VK_SUCCESS) {
+            LOGE("layer_CreateSwapchainKHR: real swapchain creation failed (%d), using AHB-only", real_res);
+            /* Fallback: return fake handle (may still fail with Wine thunks) */
+            *pSwapchain = (VkSwapchainKHR)(uintptr_t)sc;
+        } else {
+            g_real_swapchain_handle = *pSwapchain;
+            LOGI("layer_CreateSwapchainKHR: real swapchain handle=%p stored as trojan",
+                 (void*)(uintptr_t)*pSwapchain);
+
+            /* Get trojan swapchain images — these are regular device-local images
+             * (no AHB backing) that DXVK will render into safely. */
+            g_trojan_image_count = AHB_MAX_IMAGES;
+            VkResult img_res = g_dev_dispatch.GetSwapchainImagesKHR(
+                device, g_real_swapchain_handle, &g_trojan_image_count, g_trojan_images);
+            if (img_res != VK_SUCCESS && img_res != VK_INCOMPLETE) {
+                LOGE("layer_CreateSwapchainKHR: failed to get trojan images (%d)", img_res);
+                g_trojan_image_count = 0;
+            } else {
+                LOGI("layer_CreateSwapchainKHR: got %u trojan images for blit indirection",
+                     g_trojan_image_count);
+            }
+
+            /* Create command pool + per-slot command buffers + per-slot fences for blit.
+             * Per-slot resources eliminate the cross-frame fence reuse that was causing
+             * Adreno driver timeouts. Each ahb_slot owns its own (cmd_buf, fence) pair. */
+            if (g_trojan_image_count > 0 && !g_copy_cmd_pool) {
+                VkCommandPoolCreateInfo pool_ci = {
+                    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                    .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+                    .queueFamilyIndex = 0, /* graphics queue family */
+                };
+                g_dev_dispatch.CreateCommandPool(device, &pool_ci, NULL, &g_copy_cmd_pool);
+
+                VkCommandBufferAllocateInfo alloc_ci = {
+                    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                    .commandPool = g_copy_cmd_pool,
+                    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                    .commandBufferCount = g_trojan_image_count,
+                };
+                g_dev_dispatch.AllocateCommandBuffers(device, &alloc_ci, g_copy_cmd_bufs);
+
+                /* Create fences with SYNC_FD export capability so wine_ahb_queue_present
+                 * can call vkGetFenceFdKHR(SYNC_FD_BIT) on them. */
+                VkExportFenceCreateInfo export_ci = {
+                    .sType = VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO,
+                    .pNext = NULL,
+                    .handleTypes = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT,
+                };
+                VkFenceCreateInfo fence_ci = {
+                    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                    .pNext = &export_ci,
+                    /* Not signaled: vkGetFenceFdKHR(SYNC_FD) requires the fence to
+                     * have a pending signal operation OR be unsignaled. Initial
+                     * signaled state would force a wait+reset on first use. */
+                    .flags = 0,
+                };
+                int created = 0;
+                for (uint32_t i = 0; i < g_trojan_image_count; i++) {
+                    VkResult fres = g_dev_dispatch.CreateFence(device, &fence_ci, NULL, &g_copy_fences[i]);
+                    if (fres != VK_SUCCESS) {
+                        LOGW("layer_CreateSwapchainKHR: exportable fence %u failed (%d), retrying plain", i, fres);
+                        VkFenceCreateInfo plain_ci = {
+                            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                            .flags = 0,
+                        };
+                        g_dev_dispatch.CreateFence(device, &plain_ci, NULL, &g_copy_fences[i]);
+                    } else {
+                        created++;
+                    }
+                }
+                LOGI("layer_CreateSwapchainKHR: %u/%u exportable fences created",
+                     created, g_trojan_image_count);
+                LOGI("layer_CreateSwapchainKHR: per-slot blit resources created (pool=%p, %u cmd_bufs, %u fences)",
+                     (void*)g_copy_cmd_pool, g_trojan_image_count, g_trojan_image_count);
+            }
         }
     }
 
@@ -850,9 +931,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
          (int)g_present_mode_requested, (int)VK_PRESENT_MODE_FIFO_KHR,
          (int)VK_PRESENT_MODE_MAILBOX_KHR, (int)VK_PRESENT_MODE_IMMEDIATE_KHR);
 
-    LOGI("layer_CreateSwapchainKHR: AHB SWAPCHAIN CREATED (%dx%d, %u images) — BLIT INDIRECTION %s",
+    LOGI("layer_CreateSwapchainKHR: AHB SWAPCHAIN CREATED (%dx%d, %u images) — mode=%s",
          pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height, sc->image_count,
-         g_trojan_image_count > 0 ? "ACTIVE" : "DISABLED");
+         g_direct_render_mode ? "DIRECT-RENDER"
+                              : (g_trojan_image_count > 0 ? "TROJAN-BLIT" : "TROJAN-FALLBACK"));
     return VK_SUCCESS;
 }
 
@@ -861,13 +943,32 @@ static VKAPI_ATTR void VKAPI_CALL layer_DestroySwapchainKHR(
     const VkAllocationCallbacks *pAllocator)
 {
     if (g_ahb_swapchain && g_real_swapchain_handle == swapchain) {
-        LOGI("layer_DestroySwapchainKHR: destroying AHB swapchain + real handle");
+        LOGI("layer_DestroySwapchainKHR: destroying AHB swapchain (mode=%s)",
+             g_direct_render_mode ? "direct-render" : "trojan-blit");
 
-        /* Drain any in-flight blits before tearing down per-slot resources.
+        /* Drain any in-flight submits before tearing down per-slot resources.
          * QueueWaitIdle is heavy but correct here — destruction is rare. */
         if (g_saved_queue && g_dev_dispatch.QueueWaitIdle)
             g_dev_dispatch.QueueWaitIdle(g_saved_queue);
 
+        if (g_direct_render_mode) {
+            /* Direct-render mode: only per-slot fences; no command pool, no
+             * trojan images, no real swapchain to destroy. */
+            for (uint32_t i = 0; i < AHB_MAX_IMAGES; i++) {
+                if (g_copy_fences[i] != VK_NULL_HANDLE) {
+                    g_dev_dispatch.DestroyFence(device, g_copy_fences[i], NULL);
+                    g_copy_fences[i] = VK_NULL_HANDLE;
+                }
+            }
+            wine_ahb_destroy_swapchain(g_ahb_swapchain);
+            g_ahb_swapchain = NULL;
+            g_real_swapchain_handle = VK_NULL_HANDLE;
+            /* Synthetic handle is just a pointer to the wine_vk_swapchain
+             * struct (just freed); nothing for the underlying driver to do. */
+            return;
+        }
+
+        /* Trojan-blit mode: tear down per-slot fences + command pool + real swapchain. */
         for (uint32_t i = 0; i < g_trojan_image_count; i++) {
             if (g_copy_fences[i] != VK_NULL_HANDLE) {
                 g_dev_dispatch.DestroyFence(device, g_copy_fences[i], NULL);
@@ -896,9 +997,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_GetSwapchainImagesKHR(
     uint32_t *pCount, VkImage *pImages)
 {
     if (g_ahb_swapchain && g_real_swapchain_handle == swapchain) {
-        /* BLIT INDIRECTION: return trojan images (device-local, no AHB) so DXVK
-         * renders into them without gralloc lock conflicts. We copy to AHB in
-         * QueuePresentKHR. */
+        /* Direct-render mode: return AHB-backed VkImages directly. DXVK
+         * renders into them with no intermediate buffer. */
+        if (g_direct_render_mode) {
+            VkResult r = wine_ahb_get_swapchain_images(g_ahb_swapchain, pCount, pImages);
+            LOGI("layer_GetSwapchainImagesKHR: returning %u DIRECT-RENDER (AHB-backed) images, result=%d",
+                 pCount ? *pCount : 0, r);
+            return r;
+        }
+        /* Trojan-blit mode: return trojan images (device-local, no AHB) so
+         * DXVK renders into them without gralloc lock conflicts. We blit
+         * trojan → AHB in QueuePresentKHR. */
         if (g_trojan_image_count > 0) {
             if (!pImages) {
                 *pCount = g_trojan_image_count;
@@ -911,9 +1020,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_GetSwapchainImagesKHR(
             LOGI("layer_GetSwapchainImagesKHR: returning %u TROJAN images (blit indirection)", to_copy);
             return (to_copy < g_trojan_image_count) ? VK_INCOMPLETE : VK_SUCCESS;
         }
-        /* Fallback: return AHB images directly (no blit indirection) */
+        /* Fallback path: also return AHB images directly. */
         VkResult r = wine_ahb_get_swapchain_images(g_ahb_swapchain, pCount, pImages);
-        LOGI("layer_GetSwapchainImagesKHR: count=%u images=%p result=%d",
+        LOGI("layer_GetSwapchainImagesKHR: count=%u images=%p result=%d (fallback)",
              pCount ? *pCount : 0, (void*)pImages, r);
         return r;
     }
@@ -1292,13 +1401,60 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_QueuePresentKHR(
                     pthread_mutex_unlock(&g_release_mtx);
                 }
 
+                /* Direct-render mode: DXVK already wrote the final image into
+                 * the AHB. No blit needed — we just need to convert DXVK's
+                 * render-complete wait semaphores into a SYNC_FD that
+                 * SurfaceFlinger can wait on. Standard Vulkan idiom: submit
+                 * zero command buffers, wait on the semaphores, signal a
+                 * fence. wine_ahb_queue_present exports the fence as SYNC_FD.
+                 *
+                 * Saved vs trojan-blit: ~1ms GPU blit, 4 image barriers, the
+                 * CB Begin/Record/End, and the entire trojan-image allocation
+                 * at swapchain creation. */
+                if (g_direct_render_mode
+                    && g_copy_fences[ahb_slot] != VK_NULL_HANDLE) {
+
+                    VkFence fence = g_copy_fences[ahb_slot];
+                    g_dev_dispatch.ResetFences(g_device, 1, &fence);
+
+                    VkPipelineStageFlags wait_stages[8];
+                    uint32_t wait_count = pPresentInfo->waitSemaphoreCount;
+                    if (wait_count > 8) wait_count = 8;
+                    for (uint32_t w_i = 0; w_i < wait_count; w_i++) {
+                        /* BOTTOM_OF_PIPE because there's no GPU work after
+                         * the wait — the fence signals as soon as the
+                         * semaphores resolve. */
+                        wait_stages[w_i] = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+                    }
+
+                    VkSubmitInfo si = {
+                        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                        .waitSemaphoreCount = wait_count,
+                        .pWaitSemaphores = wait_count ? pPresentInfo->pWaitSemaphores : NULL,
+                        .pWaitDstStageMask = wait_count ? wait_stages : NULL,
+                        .commandBufferCount = 0,
+                        .pCommandBuffers = NULL,
+                        .signalSemaphoreCount = 0,
+                        .pSignalSemaphores = NULL,
+                    };
+                    g_dev_dispatch.QueueSubmit(queue, 1, &si, fence);
+
+                    g_presented_ring[g_presented_idx] = (int)ahb_slot;
+                    g_presented_idx = (g_presented_idx + 1) % 2;
+
+                    /* DXVK wrote BGRA bytes into the AHB (Wine's winevulkan
+                     * thunk picks BGRA regardless of our surface-format
+                     * advertisement). Tell the receiver to do an R↔B swap
+                     * via its local format-aware blit. */
+                    wine_ahb_queue_present(g_ahb_swapchain, queue, ahb_slot, fence, present_id_this, /*bgra_bytes=*/1);
+                }
                 /* === BLIT INDIRECTION: copy trojan image → AHB image ===
                  * Per-slot resources prevent cross-frame fence reuse (Adreno timeout).
                  * DXVK's wait semaphores are forwarded to the blit submit so the copy
                  * doesn't start until DXVK finishes drawing the trojan image. The
                  * resulting fence is exported as a SYNC_FD by wine_ahb_queue_present
                  * and handed to SurfaceFlinger via the present_msg — no CPU wait. */
-                if (g_trojan_image_count > 0 && g_copy_cmd_bufs[ahb_slot] != VK_NULL_HANDLE
+                else if (g_trojan_image_count > 0 && g_copy_cmd_bufs[ahb_slot] != VK_NULL_HANDLE
                     && g_copy_fences[ahb_slot] != VK_NULL_HANDLE) {
 
                     VkCommandBuffer cb = g_copy_cmd_bufs[ahb_slot];
@@ -1446,7 +1602,14 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_QueuePresentKHR(
                      * exports it as SYNC_FD (VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT)
                      * and ships the fd to Android via SCM_RIGHTS. SurfaceFlinger
                      * waits on the sync_fd before scanout. */
-                    wine_ahb_queue_present(g_ahb_swapchain, queue, ahb_slot, fence, present_id_this);
+                    /* Trojan-blit path: the layer's vkCmdBlitImage copies
+                     * trojan (B8G8R8A8) → AHB (B8G8R8A8). With the pool
+                     * now allocating HAL_BGRA AHBs (matching DXVK's
+                     * preferred swapchain format), both ends of the blit
+                     * are the same format and the operation degenerates
+                     * to a byte copy. AHB memory holds BGRA bytes →
+                     * receiver should treat it as BGRA. */
+                    wine_ahb_queue_present(g_ahb_swapchain, queue, ahb_slot, fence, present_id_this, /*bgra_bytes=*/1);
                 } else {
                     /* Fallback path: no blit infrastructure — preserve pre-fix
                      * behavior of just draining wait semaphores and forwarding. */
@@ -1466,7 +1629,11 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_QueuePresentKHR(
                     }
                     g_presented_ring[g_presented_idx] = (int)ahb_slot;
                     g_presented_idx = (g_presented_idx + 1) % 2;
-                    wine_ahb_queue_present(g_ahb_swapchain, VK_NULL_HANDLE, ahb_slot, VK_NULL_HANDLE, present_id_this);
+                    /* Fallback: AHB content is whatever DXVK happened to
+                     * write with no layer-side translation. AHB pool is
+                     * HAL_BGRA so DXVK's BGRA writes match the byte layout —
+                     * flag as BGRA. */
+                    wine_ahb_queue_present(g_ahb_swapchain, VK_NULL_HANDLE, ahb_slot, VK_NULL_HANDLE, present_id_this, /*bgra_bytes=*/1);
                 }
 
                 static int _cnt = 0;
@@ -1474,8 +1641,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_QueuePresentKHR(
                 /* Log first 30 presents to make first-launch behavior visible
                  * (including any gaps caused by DXVK shader compile). */
                 if (_cnt <= 30 || (_cnt % 60 == 0))
-                    LOGI("layer_QueuePresentKHR: frame %d slot=%u blit=%s",
-                         _cnt, ahb_slot, g_trojan_image_count > 0 ? "yes" : "no");
+                    LOGI("layer_QueuePresentKHR: frame %d slot=%u mode=%s",
+                         _cnt, ahb_slot,
+                         g_direct_render_mode ? "direct"
+                                              : (g_trojan_image_count > 0 ? "trojan-blit" : "trojan-fallback"));
                 if (pPresentInfo->pResults) pPresentInfo->pResults[i] = VK_SUCCESS;
                 return VK_SUCCESS;
             }
@@ -1811,9 +1980,15 @@ AHBLayer_GetDeviceProcAddr_Export(VkDevice device, const char *pName)
     return AHBLayer_GetDeviceProcAddr(device, pName);
 }
 
-/* Constructor for diagnostics */
+/* Constructor for diagnostics + one-time env-var reads */
 __attribute__((constructor))
 static void ahb_layer_ctor(void)
 {
-    LOGI("[CTOR] libahb_layer.so loaded in PID=%d UID=%d", getpid(), getuid());
+    /* Direct-render mode: skip the trojan-blit step, render DXVK output
+     * directly into AHB-backed VkImages. See g_direct_render_mode docs. */
+    const char *direct_env = getenv("WINLATOR_AHB_DIRECT_RENDER");
+    g_direct_render_mode = (direct_env && direct_env[0] == '1');
+
+    LOGI("[CTOR] libahb_layer.so loaded in PID=%d UID=%d direct_render=%s",
+         getpid(), getuid(), g_direct_render_mode ? "ON" : "OFF");
 }

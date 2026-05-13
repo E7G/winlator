@@ -202,6 +202,7 @@ VkResult wine_vulkan_queue_present(struct wine_vk_swapchain *swapchain,
                                    VkFence render_fence)
 {
     /* present_id=0 — this path doesn't know about DXVK's VkPresentIdKHR.
-     * Only the layer's intercepted vkQueuePresentKHR extracts the real id. */
-    return wine_ahb_queue_present(swapchain, queue, image_index, render_fence, 0);
+     * Only the layer's intercepted vkQueuePresentKHR extracts the real id.
+     * bgra_bytes=0 — legacy non-layer path uses the trojan-blit byte layout. */
+    return wine_ahb_queue_present(swapchain, queue, image_index, render_fence, 0, 0);
 }

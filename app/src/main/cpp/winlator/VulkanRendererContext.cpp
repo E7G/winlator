@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <poll.h>
+#include <errno.h>
 #include <dlfcn.h>
 #include "window_vert.h"
 #include "window_frag.h"
@@ -149,6 +151,7 @@ void VulkanRendererContext::loadDeviceDispatch() {
     LOAD_D2(CmdSetScissor);
     LOAD_D2(CmdPipelineBarrier);
     LOAD_D2(CmdCopyImage);
+    LOAD_D2(CmdBlitImage);
     LOAD_D2(CmdCopyBufferToImage);
     LOAD_D2(CreateSampler);
     LOAD_D2(DestroySampler);
@@ -518,36 +521,43 @@ bool VulkanRendererContext::createWinTexResources(WinTex& wt, int w, int h) {
     return true;
 }
 
-bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb) {
+bool VulkanRendererContext::importAHBToWinTex(WinTex& wt, AHardwareBuffer* ahb, VkFormat overrideFormat) {
 
-    if (!vk_.GetAndroidHardwareBufferPropertiesANDROID) 
+    if (!vk_.GetAndroidHardwareBufferPropertiesANDROID)
     	return false;
-    	
-    VkAndroidHardwareBufferFormatPropertiesANDROID fmtP{}; 
+
+    VkAndroidHardwareBufferFormatPropertiesANDROID fmtP{};
     fmtP.sType=VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID;
-    VkAndroidHardwareBufferPropertiesANDROID props{}; 
-    props.sType=VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID; 
+    VkAndroidHardwareBufferPropertiesANDROID props{};
+    props.sType=VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID;
     props.pNext=&fmtP;
-    if (vk_.GetAndroidHardwareBufferPropertiesANDROID(device,ahb,&props)!=VK_SUCCESS) 
+    if (vk_.GetAndroidHardwareBufferPropertiesANDROID(device,ahb,&props)!=VK_SUCCESS)
     	return false;
-    	
-    AHardwareBuffer_Desc desc{}; 
+
+    AHardwareBuffer_Desc desc{};
     AHardwareBuffer_describe(ahb,&desc);
-    
-    VkExternalFormatANDROID ef{}; 
-    ef.sType=VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID; 
-    ef.externalFormat=(swapRB)?VK_FORMAT_R8G8B8A8_UNORM:VK_FORMAT_B8G8R8A8_UNORM;
-    
-    VkExternalMemoryImageCreateInfo emi{}; 
-    emi.sType=VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO; 
+
+    /* If caller supplied an explicit format (e.g. direct-render scanout
+     * needs B8G8R8A8 to match DXVK's written byte order), use it; else
+     * fall back to the swapRB-based default. */
+    VkFormat use_format = overrideFormat;
+    if (use_format == VK_FORMAT_UNDEFINED)
+        use_format = (swapRB) ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_B8G8R8A8_UNORM;
+
+    VkExternalFormatANDROID ef{};
+    ef.sType=VK_STRUCTURE_TYPE_EXTERNAL_FORMAT_ANDROID;
+    ef.externalFormat=use_format;
+
+    VkExternalMemoryImageCreateInfo emi{};
+    emi.sType=VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
     emi.handleTypes=VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
-    ef.pNext=const_cast<void*>(emi.pNext); 
+    ef.pNext=const_cast<void*>(emi.pNext);
     emi.pNext=&ef;
-    
-    VkImageCreateInfo ii{}; 
-    ii.sType=VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO; 
+
+    VkImageCreateInfo ii{};
+    ii.sType=VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ii.pNext=&emi; ii.imageType=VK_IMAGE_TYPE_2D;
-    ii.format=(swapRB)?VK_FORMAT_R8G8B8A8_UNORM:VK_FORMAT_B8G8R8A8_UNORM; 
+    ii.format=use_format;
     ii.extent={desc.width,desc.height,1};
     ii.mipLevels=1; 
     ii.arrayLayers=1; 
@@ -1361,7 +1371,7 @@ void VulkanRendererContext::destroyScanout() {
     scanoutCursorBufW = scanoutCursorBufH = 0;
 }
 
-void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFenceFd, int slotIndex, int x, int y, int w, int h) {
+void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFenceFd, int slotIndex, int x, int y, int w, int h, int bgraBytes) {
     if (!scanoutActive.load() || !scanoutGameSC || !ahb) {
         RLOG("scanoutSetBuffer: SKIPPED active=%d sc=%p ahb=%p",
             (int)scanoutActive.load(),scanoutGameSC,(void*)ahb);
@@ -1392,7 +1402,7 @@ void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFe
       if (scanoutPendingDirty.load() && scanoutPending.acquireFenceFd >= 0) {
           close(scanoutPending.acquireFenceFd);
       }
-      scanoutPending = {ahb, acquireFenceFd, slotIndex, x, y, w, h};
+      scanoutPending = {ahb, acquireFenceFd, slotIndex, x, y, w, h, bgraBytes};
       scanoutPendingDirty.store(true, std::memory_order_release); }
     needsRender.store(true, std::memory_order_release);
     dirtyCV.notify_one();
@@ -1449,7 +1459,8 @@ void VulkanRendererContext::initScanoutFromWindows(ANativeWindow* gameWin, ANati
 
 bool VulkanRendererContext::ensureScanoutLocalAhb(int w, int h, uint32_t ahbFormat) {
     if (scanoutLocalAhb && scanoutLocalImg != VK_NULL_HANDLE &&
-        scanoutLocalW == w && scanoutLocalH == h) {
+        scanoutLocalW == w && scanoutLocalH == h &&
+        scanoutLocalAhbFormat == ahbFormat) {
         return true;
     }
 
@@ -1546,6 +1557,7 @@ bool VulkanRendererContext::ensureScanoutLocalAhb(int w, int h, uint32_t ahbForm
 
     scanoutLocalW = w;
     scanoutLocalH = h;
+    scanoutLocalAhbFormat = ahbFormat;
     return true;
 }
 
@@ -1575,17 +1587,68 @@ void VulkanRendererContext::applyScanoutBuffer() {
     }
 
     AHardwareBuffer* presentAhb = ahb;
-    if (scanoutAlwaysGpuBlit || scanoutNeedsGpuBlit) {
+
+    /* === P3: Direct passthrough with CPU-side fence wait ===
+     *
+     * When the source AHB is overlay-capable AND has BGRA byte layout
+     * (matching SurfaceFlinger's read semantics), skip the receiver-side
+     * GPU blit entirely. The cost of that blit was the dominant FPS
+     * bottleneck (~3-4ms per frame on the Odin 2's Adreno). Without it,
+     * the frame goes straight from DXVK → AHB → SurfaceFlinger overlay.
+     *
+     * Why CPU-poll instead of trusting the acquire fence at setBuffer:
+     * Odin 2's HWC empirically doesn't honor the acquire-fence-fd when
+     * scanning out overlays — earlier direct-passthrough experiments
+     * produced visible scanline tearing. By polling the fence FD on the
+     * CPU here (blocks until the kernel signals GPU completion), we
+     * guarantee the buffer is fully written before we tell SF to display
+     * it. SF can still wait on the fence too (it's a no-op since we
+     * already CPU-confirmed it's signaled) — defense in depth.
+     *
+     * Conditions to engage:
+     *   - p.bgraBytes != 0: source AHB has BGRA byte layout (pool default).
+     *   - !scanoutNeedsGpuBlit: source AHB has COMPOSER_OVERLAY (confirmed
+     *     on first frame).
+     * Otherwise fall back to the local-blit path for safety. */
+    const bool canDirectPassthrough = (p.bgraBytes != 0) && !scanoutNeedsGpuBlit;
+    if (canDirectPassthrough) {
+        if (acquireFd >= 0) {
+            /* poll() with POLLIN signals when the SYNC_FD is ready (kernel
+             * fence signaled). Tight timeout — if the fence hangs, we
+             * shouldn't stall display forever. The fd stays valid and
+             * gets passed to ST_SETBUF below (defense in depth). */
+            struct pollfd pfd{};
+            pfd.fd = acquireFd;
+            pfd.events = POLLIN;
+            int rc = poll(&pfd, 1, 30 /* ms */);
+            if (rc < 0) {
+                RLOG("applyScanoutBuffer: poll(acquire_fd) errno=%d", errno);
+            } else if (rc == 0) {
+                RLOG("applyScanoutBuffer: poll(acquire_fd) TIMEOUT after 30ms — proceeding anyway");
+            }
+        }
+        /* presentAhb stays = source ahb. No local blit. SF gets the AHB
+         * directly with COMPOSER_OVERLAY usage, eligible for hardware
+         * overlay scanout. */
+    } else if (scanoutAlwaysGpuBlit || scanoutNeedsGpuBlit) {
         AHardwareBuffer_Desc srcDesc{};
         AHardwareBuffer_describe(ahb, &srcDesc);
         if (ensureScanoutLocalAhb((int)srcDesc.width, (int)srcDesc.height, srcDesc.format)) {
+            /* Import the source AHB as B8G8R8A8 in direct-render mode (DXVK
+             * wrote BGRA bytes into a HAL_RGBA AHB), or default-via-swapRB
+             * otherwise. The subsequent blit uses format-aware reinterpretation
+             * (BlitImage) to swap R↔B when needed. */
+            const VkFormat srcImportFormat = (p.bgraBytes != 0)
+                ? VK_FORMAT_B8G8R8A8_UNORM
+                : VK_FORMAT_UNDEFINED;
+
             VkImage srcImg = VK_NULL_HANDLE;
             auto it = ahbTexCache.find(ahb);
             if (it != ahbTexCache.end()) {
                 srcImg = it->second.img;
             } else {
                 WinTex tmp{};
-                if (importAHBToWinTex(tmp, ahb)) {
+                if (importAHBToWinTex(tmp, ahb, srcImportFormat)) {
                     AHBCached cached{tmp.img, tmp.mem, tmp.view, tmp.ds};
                     AHardwareBuffer_acquire(ahb);
                     ahbTexCache[ahb] = cached;
@@ -1614,14 +1677,34 @@ void VulkanRendererContext::applyScanoutBuffer() {
                     0, VK_ACCESS_TRANSFER_WRITE_BIT,
                     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-                VkImageCopy region{};
-                region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-                region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-                region.extent = {(uint32_t)w, (uint32_t)h, 1};
-                vk_.CmdCopyImage(scanoutBlitCb,
-                    srcImg, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                    scanoutLocalImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    1, &region);
+                if (p.bgraBytes != 0) {
+                    /* Direct-render mode: format-aware blit from B8G8R8A8 src
+                     * to R8G8B8A8 dst handles the R↔B swap during the copy.
+                     * Slightly slower than vkCmdCopyImage on Adreno (uses
+                     * shader path) but uniform across formats. */
+                    VkImageBlit region{};
+                    region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+                    region.srcOffsets[0] = {0, 0, 0};
+                    region.srcOffsets[1] = {(int32_t)w, (int32_t)h, 1};
+                    region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+                    region.dstOffsets[0] = {0, 0, 0};
+                    region.dstOffsets[1] = {(int32_t)w, (int32_t)h, 1};
+                    vk_.CmdBlitImage(scanoutBlitCb,
+                        srcImg, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        scanoutLocalImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        1, &region, VK_FILTER_NEAREST);
+                } else {
+                    /* Trojan-blit mode: AHB already has correct RGBA byte order.
+                     * Plain byte copy, fastest path on Adreno. */
+                    VkImageCopy region{};
+                    region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+                    region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+                    region.extent = {(uint32_t)w, (uint32_t)h, 1};
+                    vk_.CmdCopyImage(scanoutBlitCb,
+                        srcImg, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        scanoutLocalImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        1, &region);
+                }
                 vk_.EndCommandBuffer(scanoutBlitCb);
 
                 VkSubmitInfo si{};

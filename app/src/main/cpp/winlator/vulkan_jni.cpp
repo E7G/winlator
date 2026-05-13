@@ -32,6 +32,10 @@ struct present_msg {
     int32_t  acquire_fd;
     int32_t  dst_x, dst_y, dst_w, dst_h;
     uint64_t present_id;   /* DXVK's VkPresentIdKHR.pPresentIds[i]; 0 if none */
+    uint8_t  bgra_bytes;   /* 1 = source AHB has BGRA byte order; do an R↔B
+                            * swap during the receiver's local blit (via
+                            * vkCmdBlitImage with B8G8R8A8 src + R8G8B8A8 dst).
+                            * 0 = AHB already has RGBA bytes; plain copy. */
 };
 
 struct release_msg {
@@ -57,6 +61,12 @@ struct PresentReceiverState {
     int screenHeight;
     std::atomic<bool> running{true};
     std::atomic<int> mailboxSlot{-1};  /* latest slot for display thread */
+    /* Sticky AHB byte-order flag, set by the recv thread from each
+     * present_msg.bgra_bytes. The layer's mode (direct-render vs
+     * trojan-blit) is pinned per swapchain, so this value is stable for
+     * the lifetime of the connection — recv writes it on every frame,
+     * display reads the latest value when it picks up a slot. */
+    std::atomic<int> sourceBgraBytes{0};
     pthread_t thread;
     pthread_t displayThread;
     /* Phase-lock vsync source. Spawned at receiver-startup, it runs an
@@ -193,8 +203,9 @@ static void* display_thread_func(void* arg) {
                 PRESENT_LOGI("display thread: initScanout done");
             }
         }
+        int bgraBytes = state->sourceBgraBytes.load(std::memory_order_acquire);
         state->renderer->scanoutSetBuffer(ahb, -1, slot,
-            0, 0, state->screenWidth, state->screenHeight);
+            0, 0, state->screenWidth, state->screenHeight, bgraBytes);
         /* Trigger the GPU blit + SurfaceFlinger submission immediately.
          * applyScanoutBuffer() blits from the source AHB to a LOCAL display buffer,
          * then submits the LOCAL buffer to SurfaceFlinger. This means the source AHB
@@ -351,6 +362,13 @@ static void* present_receiver_thread(void* arg) {
                 }
             }
         }
+
+        /* Record the source AHB byte order from the layer (BGRA in
+         * direct-render mode, RGBA in trojan-blit mode). The display
+         * thread reads this when it picks up the next slot and tells the
+         * compositor whether to do an R↔B swap during the local blit. */
+        state->sourceBgraBytes.store(pmsg.bgra_bytes != 0 ? 1 : 0,
+                                     std::memory_order_release);
 
         /* Push the LATEST slot to the mailbox for the display thread. With true
          * mailbox semantics, Wine renders unthrottled up to the pool capacity; the

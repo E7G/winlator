@@ -200,15 +200,39 @@ public class AHardwareBufferPool {
      * Convenience constructor using the default format and usage flags required
      * by the direct compositing path.
      *
-     * <p>Format: {@code AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM} (1)<br>
-     * Usage: {@code GPU_FRAMEBUFFER | GPU_SAMPLED_IMAGE | COMPOSER_OVERLAY}
-     * (0x130 = 0x100 | 0x20 | 0x10)
-     */
+     * <p>Format: {@code HAL_PIXEL_FORMAT_BGRA_8888} (5)<br>
+     * Usage: {@code GPU_COLOR_OUTPUT | GPU_SAMPLED_IMAGE | COMPOSER_OVERLAY}
+     * (0xB00 = 0x200 | 0x100 | 0x800)
+     *
+     * <p>Why BGRA: DXVK's preferred swapchain format is
+     * {@code DXGI_FORMAT_B8G8R8A8_UNORM} → Vulkan
+     * {@code VK_FORMAT_B8G8R8A8_UNORM}. When DXVK renders into an AHB-
+     * backed VkImage, the byte layout in memory matches whatever Vulkan
+     * format the image was created with. If we allocate the AHB as
+     * RGBA_8888 but DXVK writes BGRA, SurfaceFlinger (which reads the AHB
+     * per its HAL format) sees swapped channels — red and blue look
+     * inverted on screen. Allocating as BGRA_8888 makes the byte layout
+     * agree end-to-end (DXVK writes BGRA, AHB stores BGRA, SF reads as
+     * BGRA). No swap step needed anywhere.
+     *
+     * <p>{@code GPU_COLOR_OUTPUT} (a.k.a. {@code GPU_FRAMEBUFFER}) lets DXVK
+     * render directly into the AHB as a Vulkan color attachment.
+     * {@code GPU_SAMPLED_IMAGE} lets the host process import it as a
+     * sampled texture (used by the trojan-blit fallback path).
+     * {@code COMPOSER_OVERLAY} signals to SurfaceFlinger that the buffer is
+     * eligible for direct hardware-overlay scanout — required to skip the
+     * GPU composition path on the host process.
+     *
+     * <p>{@code HAL_PIXEL_FORMAT_BGRA_8888 = 5} isn't in the public NDK
+     * {@code AHARDWAREBUFFER_FORMAT_*} enum but is accepted by
+     * {@code AHardwareBuffer_allocate} on Adreno gralloc (and most other
+     * Android device gralloc impls). If a device rejects it, pool init
+     * will fail and the app falls back to the X11 compositor path. */
     public AHardwareBufferPool(int width, int height, int count) {
         this(width, height, count,
-             /* AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM */ 1,
-             /* GPU_FRAMEBUFFER | GPU_SAMPLED_IMAGE | COMPOSER_OVERLAY */
-             0x130L);
+             /* HAL_PIXEL_FORMAT_BGRA_8888 (not in public AHARDWAREBUFFER_FORMAT enum) */ 5,
+             /* GPU_COLOR_OUTPUT | GPU_SAMPLED_IMAGE | COMPOSER_OVERLAY */
+             0xB00L);
     }
 
     // =========================================================================
