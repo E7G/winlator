@@ -1195,7 +1195,9 @@ bool VulkanRendererContext::loadScanoutApi() {
     fnSTSetGeometry      = dlsym(lib, "ASurfaceTransaction_setGeometry");
     fnSTSetBackPressure  = dlsym(lib, "ASurfaceTransaction_setEnableBackPressure");
     fnSTSetOnComplete    = dlsym(lib, "ASurfaceTransaction_setOnComplete");
+    fnSTSetOnCommit      = dlsym(lib, "ASurfaceTransaction_setOnCommit");   /* API 31+; preferred over setOnComplete for vsync pacing */
     fnSTSetFrameRate     = dlsym(lib, "ASurfaceTransaction_setFrameRate"); /* API 30+; may be NULL on older Android */
+    fnSTSetBufferTransparency = dlsym(lib, "ASurfaceTransaction_setBufferTransparency"); /* API 29+ — mark SC opaque so SurfaceFlinger doesn't alpha-blend against background */
 
     bool coreOk = fnSCCreateFromWin && fnSCRelease &&
                   fnSTCreate && fnSTDelete && fnSTApply &&
@@ -1209,6 +1211,8 @@ bool VulkanRendererContext::loadScanoutApi() {
     if (!fnSTSetZOrder) SCANOUT_LOG("loadScanoutApi: setZOrder unavailable (non-critical)");
     SCANOUT_LOG("loadScanoutApi: setFrameRate %s (needed for >60Hz refresh)",
         fnSTSetFrameRate ? "available" : "NOT AVAILABLE (Android < 11?)");
+    SCANOUT_LOG("loadScanoutApi: setOnCommit %s (drives DXVK vkWaitForPresentKHR pacing)",
+        fnSTSetOnCommit ? "available" : "NOT AVAILABLE (Android < 12; falling back to setOnComplete)");
     const char* gpuBlitEnv = std::getenv("WINLATOR_SCANOUT_GPU_BLIT");
     scanoutEnvGpuBlit = (!gpuBlitEnv || gpuBlitEnv[0] == '1');
     scanoutAlwaysGpuBlit = scanoutEnvGpuBlit || swapRB;
@@ -1228,6 +1232,18 @@ bool VulkanRendererContext::loadScanoutApi() {
 #define ST_SETVIS(t,sc,v)     ((pfn_STSetVisibility)fnSTSetVisibility)((t),(sc),(v))
 #define ST_SETGEO(t,sc,s,d,r)  ((pfn_STSetGeometry)fnSTSetGeometry)((t),(sc),(s),(d),(r))
 #define ST_SETBP(t,sc,v)       if(fnSTSetBackPressure) ((pfn_STSetBackPressure)fnSTSetBackPressure)((t),(sc),(v))
+/* setBufferTransparency: API 29+. transparency=2 (OPAQUE) tells SurfaceFlinger to
+ * ignore the buffer's alpha channel during composition. DXVK leaves garbage in
+ * the alpha channel of its render targets (PC monitors aren't transparent so it
+ * doesn't bother). Without this flag, SurfaceFlinger treats those garbage alpha
+ * values as semi-transparency hints and alpha-blends our live frame against
+ * whatever stale framebuffer sits underneath the SurfaceControl — producing
+ * "ghosted/doubled motion" during camera movement because the eye sees both
+ * the new frame and a faded copy of an older one. Marking the SC OPAQUE makes
+ * compositing a straight overwrite and eliminates the ghost. */
+#define ST_TRANSPARENCY_OPAQUE 2
+#define ST_SETOPAQUE(t,sc)     do { if (fnSTSetBufferTransparency) \
+    ((void(*)(void*,void*,int8_t))fnSTSetBufferTransparency)((t),(sc),ST_TRANSPARENCY_OPAQUE); } while(0)
 
 void VulkanRendererContext::initScanout() {
     if (scanoutActive.load()) return;
@@ -1250,6 +1266,16 @@ void VulkanRendererContext::initScanout() {
     ST_SETZORDER(t, scanoutCursorSC, 1);
     ST_SETVIS(t, scanoutGameSC,   0);
     ST_SETVIS(t, scanoutCursorSC, 0);
+
+    /* NOTE: previously called ST_SETOPAQUE(t, scanoutGameSC) here based on
+     * the hypothesis that DXVK's garbage alpha was causing SurfaceFlinger
+     * to alpha-blend the live frame against the stale background. On the
+     * Odin 2 Portal that change appears to nudge SurfaceFlinger onto the
+     * hardware-overlay composition path, which on this SoC doesn't honor
+     * the layer's exported acquire-fence — producing tearing and a slot
+     * release stall that pinned FPS at ~15. Leaving the SC in default
+     * TRANSLUCENT mode until we have a verified-working hardware-overlay
+     * acquire-fence path. */
 
     /* Request the panel's max refresh rate (e.g., 120 Hz on Odin 2 Portal).
      * Compatibility=0 (DEFAULT) tells SurfaceFlinger to pick the nearest rate
@@ -1351,6 +1377,15 @@ void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFe
             d.format, d.width, d.height, (unsigned long long)d.usage,
             hasOverlay ? "YES" : "NO");
         scanoutNeedsGpuBlit = !hasOverlay;
+        /* NOTE: We previously tried to skip the local blit when the AHB had
+         * COMPOSER_OVERLAY. That regressed on the Odin 2 Portal: SurfaceFlinger
+         * put the SurfaceControl on a hardware overlay but didn't honor the
+         * layer's exported acquire-fence, producing visible scanline tearing,
+         * and slot release switched from ~1ms (local-copy-then-free) to
+         * ~33ms (OnComplete-driven), starving the layer's slot pool and
+         * collapsing FPS to ~15 via the pacing budget. Kept the local-blit
+         * path active by default until we have a working acquire-fence path
+         * on hardware overlays for this SoC. */
     }
     // AHardwareBuffer_acquire removed: pool owns the ref, SurfaceFlinger manages its own
     { std::lock_guard<std::mutex> lk(scanoutMutex);
@@ -1383,6 +1418,8 @@ void VulkanRendererContext::initScanoutFromWindows(ANativeWindow* gameWin, ANati
     ST_SETZORDER(t, scanoutCursorSC, 1);
     ST_SETVIS(t, scanoutGameSC,   0);
     ST_SETVIS(t, scanoutCursorSC, 0);
+    /* Game SC kept in default TRANSLUCENT mode — see initScanout() for why
+     * we don't call ST_SETOPAQUE on this SoC. */
     ST_APPLY(t); ST_DELETE(t);
     gameScVisible = false; lastDstW = 0;
     gameFrameDelivered.store(false);
@@ -1603,34 +1640,94 @@ void VulkanRendererContext::applyScanoutBuffer() {
     ST_SETVIS(t,scanoutGameSC,1);
     ST_SETBP(t,scanoutGameSC,false);
 
-    // Register onComplete callback to send MSG_RELEASE for the PREVIOUS buffer.
-    // When this transaction completes, SurfaceFlinger releases the previously-displayed buffer.
+    // Two callbacks here serve two distinct purposes:
+    //
+    //  1. onCommit (API 31+, preferred): fires ~1 vsync after apply, at the
+    //     moment SurfaceFlinger latches the buffer for the next frame.
+    //     Sends MSG_TICK (type=5). The layer's release-reader thread uses
+    //     this to advance g_display_count, which drives vkWaitForPresentKHR's
+    //     pacing wait — locking DXVK to real panel vsync without the 2-vsync
+    //     latency that plain onComplete-driven pacing imposes.
+    //
+    //  2. onComplete: fires later, when the previous buffer is no longer
+    //     in use by SurfaceFlinger. Sends MSG_RELEASE (slot freeing only,
+    //     displayed=0 so we don't double-tick alongside onCommit). If
+    //     onCommit is unavailable (older Android), this falls back to
+    //     displayed=1 so the existing tick path keeps working.
     static int scanoutPrevDisplayedSlot = -1;
-    if (fnSTSetOnComplete && scanoutPrevDisplayedSlot >= 0) {
+    int sockFd = scanoutSocketFd.load(std::memory_order_relaxed);
+
+    // Register onCommit on the CURRENT transaction. It will fire when
+    // *this* slot's buffer reaches the display. The context only needs the
+    // socket fd; we tick once per commit regardless of slot identity.
+    if (fnSTSetOnCommit && sockFd >= 0) {
+        typedef void (*pfn_STSetOnCommit)(void*, void*, void(*)(void*, void*));
+        struct OnCommitCtx { int socketFd; };
+        auto* ctx = new OnCommitCtx{sockFd};
+        ((pfn_STSetOnCommit)fnSTSetOnCommit)(t, (void*)ctx,
+            [](void* context, void* stats) {
+                auto* c = reinterpret_cast<OnCommitCtx*>(context);
+                /* JITTER TRACE: SurfaceFlinger's onCommit firing rate.
+                 * Compare against layer-side stage=tick to measure socket
+                 * latency from SF → Android receiver → Wine release-reader. */
+                {
+                    struct timespec ts;
+                    clock_gettime(CLOCK_MONOTONIC, &ts);
+                    uint64_t now_us = (uint64_t)ts.tv_sec * 1000000ULL
+                                    + (uint64_t)ts.tv_nsec / 1000ULL;
+                    static uint64_t s_commit_prev = 0;
+                    uint64_t prev = s_commit_prev;
+                    s_commit_prev = now_us;
+                    if (prev) {
+                        __android_log_print(ANDROID_LOG_INFO, "Winlator_Scanout",
+                            "JITTER_TRACE: stage=onCommit delta_us=%llu",
+                            (unsigned long long)(now_us - prev));
+                    }
+                }
+                /* Send a MSG_TICK packet using the release_msg wire format.
+                 * Layout MUST match struct release_msg in vulkan_ahb.h EXACTLY,
+                 * including the trailing vsync_time_ns field (added with the
+                 * Choreographer phase-anchor work). The Wine-side socket is
+                 * SOCK_STREAM, so any size mismatch shifts subsequent messages
+                 * and corrupts the entire stream → slots stop releasing →
+                 * black screen. Zero-init the new field; only MSG_VSYNC reads it. */
+                struct { uint8_t type; uint32_t slot_index; int32_t release_fd; uint8_t displayed; uint64_t vsync_time_ns; } tick{};
+                tick.type = 5; // MSG_TICK
+                send(c->socketFd, &tick, sizeof(tick), MSG_NOSIGNAL);
+                delete c;
+            });
+    }
+
+    // onComplete: free the previously-displayed slot.
+    if (fnSTSetOnComplete && scanoutPrevDisplayedSlot >= 0 && sockFd >= 0) {
         struct OnCompleteCtx {
             int socketFd;
             int slotIndex;
+            int tickFromComplete;  /* 1 if we should also tick here (no onCommit) */
         };
-        int sockFd = scanoutSocketFd.load(std::memory_order_relaxed);
-        if (sockFd >= 0) {
-            auto* ctx = new OnCompleteCtx{sockFd, scanoutPrevDisplayedSlot};
-            ((pfn_STSetOnComplete)fnSTSetOnComplete)(t, (void*)ctx,
-                [](void* context, void* stats) {
-                    auto* c = reinterpret_cast<OnCompleteCtx*>(context);
-                    /* MSG_RELEASE with displayed=1 — this fires from
-                     * SurfaceFlinger's onComplete, meaning the previous slot's
-                     * buffer was actually scanned out. The layer uses
-                     * displayed=1 to advance its vsync-paced display counter
-                     * that drives vkWaitForPresentKHR. */
-                    struct { uint8_t type; uint32_t slot_index; int32_t release_fd; uint8_t displayed; } rel;
-                    rel.type = 2; // MSG_RELEASE
-                    rel.slot_index = (uint32_t)c->slotIndex;
-                    rel.release_fd = -1;
-                    rel.displayed = 1;  // onComplete = real vsync tick
-                    send(c->socketFd, &rel, sizeof(rel), MSG_NOSIGNAL);
-                    delete c;
-                });
-        }
+        auto* ctx = new OnCompleteCtx{
+            sockFd, scanoutPrevDisplayedSlot,
+            fnSTSetOnCommit ? 0 : 1
+        };
+        ((pfn_STSetOnComplete)fnSTSetOnComplete)(t, (void*)ctx,
+            [](void* context, void* stats) {
+                auto* c = reinterpret_cast<OnCompleteCtx*>(context);
+                /* Layout MUST match struct release_msg in vulkan_ahb.h EXACTLY
+                 * (including the trailing vsync_time_ns field used by MSG_VSYNC).
+                 * SOCK_STREAM has no record boundaries — any size drift shifts
+                 * every subsequent message. */
+                struct { uint8_t type; uint32_t slot_index; int32_t release_fd; uint8_t displayed; uint64_t vsync_time_ns; } rel{};
+                rel.type = 2; // MSG_RELEASE
+                rel.slot_index = (uint32_t)c->slotIndex;
+                rel.release_fd = -1;
+                /* If onCommit isn't available, displayed=1 keeps the layer's
+                 * old pacing path working (just with the 2-vsync latency).
+                 * If onCommit IS available, MSG_TICK already advanced
+                 * g_display_count, so displayed=0 (slot free only). */
+                rel.displayed = (uint8_t)c->tickFromComplete;
+                send(c->socketFd, &rel, sizeof(rel), MSG_NOSIGNAL);
+                delete c;
+            });
     }
     scanoutPrevDisplayedSlot = p.slotIndex;
 

@@ -24,6 +24,27 @@
 #define MSG_RELEASE  2
 #define MSG_BUFFER   3
 #define MSG_REQUEST  4
+/* MSG_TICK: Android → Wine. Fires from ASurfaceTransaction_setOnCommit
+ * (API 31+), once per real panel vsync. Drives vkWaitForPresentKHR pacing
+ * in the layer. Distinct from MSG_RELEASE because we need pacing decoupled
+ * from slot-freeing: OnCommit fires ~1 vsync earlier than OnComplete, which
+ * lets DXVK pipeline frames instead of being locked to apply→display
+ * latency. Sent with the same struct layout as release_msg (with type=5
+ * and the other fields ignored) so the receive loop can read fixed-size
+ * messages. */
+#define MSG_TICK     5
+
+/* MSG_VSYNC: Android → Wine. Fires from AChoreographer_postFrameCallback
+ * (API 24+), once per real panel vsync — INDEPENDENT of whether we have
+ * actually applied a transaction. This is what MSG_TICK was supposed to
+ * be but couldn't be (OnCommit only fires when we commit; ticks then
+ * follow our own present rate, not the panel rate). MSG_VSYNC is the
+ * true panel-rate signal. Used by vkWaitForPresentKHR to phase-lock the
+ * layer's release of DXVK's render thread to actual hardware vsync,
+ * eliminating the scheduler-jitter "doubled motion" artifact that
+ * pure-wall-clock pacing exhibits during fast camera motion. Sent with
+ * the same struct layout as release_msg (type=6, other fields ignored). */
+#define MSG_VSYNC    6
 
 /* Maximum swapchain images */
 #define AHB_MAX_IMAGES 4
@@ -43,13 +64,20 @@ struct present_msg {
 };
 
 struct release_msg {
-    uint8_t  type;         /* MSG_RELEASE */
+    uint8_t  type;         /* MSG_RELEASE / MSG_TICK / MSG_VSYNC */
     uint32_t slot_index;
     int32_t  release_fd;   /* sent as SCM_RIGHTS ancillary data */
     uint8_t  displayed;    /* 1 = onComplete release (frame was shown);
                             * 0 = mailbox-drain release (frame was skipped).
                             * Only displayed=1 advances the layer's
                             * display_count for vkWaitForPresentKHR pacing. */
+    uint64_t vsync_time_ns; /* For MSG_VSYNC: AChoreographer frameTimeNanos
+                             * (i.e. the actual panel vsync timestamp in
+                             * CLOCK_MONOTONIC ns). Ignored for other types.
+                             * Lets WFP's phase-anchored sleep target the
+                             * REAL panel vsync rather than the IPC arrival
+                             * time, removing socket+recv-thread latency
+                             * variance from the wake target. */
 };
 
 struct buffer_msg {

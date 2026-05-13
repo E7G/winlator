@@ -261,7 +261,9 @@ private:
     void*  fnSTSetGeometry    = nullptr;
     void*  fnSTSetBackPressure = nullptr;
     void*  fnSTSetOnComplete   = nullptr;
+    void*  fnSTSetOnCommit     = nullptr;  /* ASurfaceTransaction_setOnCommit, API 31+ */
     void*  fnSTSetFrameRate    = nullptr;  /* ASurfaceTransaction_setFrameRate, API 30+ */
+    void*  fnSTSetBufferTransparency = nullptr;  /* ASurfaceTransaction_setBufferTransparency, API 29+ */
     bool   loadScanoutApi();
 
     int32_t scanoutDstX=0, scanoutDstY=0, scanoutDstW=0, scanoutDstH=0;

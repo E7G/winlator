@@ -159,10 +159,142 @@ static uint64_t g_max_completed_present_id = 0;
  * real vsync. */
 static uint64_t g_display_count = 0;
 
+/* === PHASE-ANCHORED VSYNC TIMESTAMP ===
+ * Updated on every MSG_VSYNC from the Android receiver — i.e. once per
+ * AChoreographer callback, i.e. once per real panel vsync independent of
+ * our present cadence. WFP uses this as a PHASE REFERENCE for
+ * clock_nanosleep TIMER_ABSTIME: the wake target is computed as
+ *   target = g_last_hardware_vsync_us + N * 16667us  (smallest N s.t. > now)
+ * and the kernel sleeps until that absolute monotonic time. This decouples:
+ *   - the IPC delivery path (which has thread-hop variance) from
+ *   - the actual wake (which is kernel-scheduler precise).
+ * The IPC just keeps the clock synchronized; nanosleep does the wake.
+ *
+ * The counter (g_vsync_count) is kept for diagnostics — it's never used
+ * to gate WFP because cond-var-on-MSG_VSYNC adds the same multi-hop
+ * variance that we are trying to escape.
+ *
+ * Both fields read/written under g_release_mtx (cheap; uncontended). */
+static uint64_t g_vsync_count = 0;
+static uint64_t g_last_hardware_vsync_us = 0;
+
 static pthread_mutex_t g_release_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  g_release_cv  = PTHREAD_COND_INITIALIZER;
 static pthread_t g_release_thread;
 static bool g_release_thread_running = false;
+
+/* === FRAME PACING (Pillar 2 — Swappy-style predictor) ===
+ *
+ * Problem: DXVK render time is bimodal — most frames finish in time for the
+ * next vsync, some don't. Without pacing, the user sees motion alternating
+ * between 60 FPS smooth and 30 FPS chop.
+ *
+ * Solution: track recent render times in a rolling window. On each
+ * vkWaitForPresentKHR, predict the next render time (p90 — robust to
+ * outliers), divide by the self-discovered vsync period, and wait that
+ * many MSG_TICK events before returning. Result: every frame interval is
+ * exactly a multiple of vsync. No bimodality.
+ *
+ * Hysteresis: only allow stepping DOWN to a lower interval count if the
+ * predicted render time is comfortably below the lower bucket (85% of
+ * one bucket). Prevents single-frame oscillation. All state guarded by
+ * g_release_mtx so reads in WaitForPresent are consistent. */
+#define FP_WINDOW 16
+/* Skip the first N samples — startup is dominated by shader compile / asset
+ * load hitches that don't represent steady-state render time and poison
+ * any percentile prediction. */
+#define FP_WARMUP_FRAMES 5
+
+/* Rolling window of CPU render times (acquire → present, microseconds). */
+static uint64_t g_fp_render_times[FP_WINDOW] = {0};
+static uint32_t g_fp_render_head  = 0;
+static uint32_t g_fp_render_count = 0;
+/* Counts samples we've SEEN (including warmup-skipped ones) so we can skip
+ * the first N without affecting the recorded window. */
+static uint32_t g_fp_render_seen  = 0;
+/* Set in acquire; consumed (and reset to 0) in present. */
+static uint64_t g_fp_last_acquire_us = 0;
+
+/* Rolling window of MSG_TICK inter-arrival deltas → self-discovered vsync
+ * period. Defaults to 60 Hz (16.67 ms) until we have enough samples. */
+static uint64_t g_fp_tick_deltas[FP_WINDOW] = {0};
+static uint32_t g_fp_tick_head    = 0;
+static uint32_t g_fp_tick_count   = 0;
+static uint64_t g_fp_last_tick_for_period_us = 0;
+static uint64_t g_fp_vsync_period_us = 16667;
+
+/* For time-based pacing (separate from tick-based natural pacing) */
+static uint64_t g_fp_last_wait_return_us = 0;
+
+/* Helpers — small enough for bubble sort to dominate cache lines.
+ *
+ * Note on choice of statistic: Swappy uses p90 (pessimistic). That's
+ * theoretically right because UNDER-estimating render time causes vsync
+ * misses, which manifest as jitter. The catch in our setting is that
+ * startup hitches (shader compile, asset load) poison the window with
+ * 50–200ms samples that take >FP_WINDOW frames to age out. p90 captures
+ * exactly those poisoning values and locks us into clamp-4 pacing.
+ *
+ * We use p50 (median) instead — robust to single-sample outliers — and
+ * combine it with a small upward bias (15%) for safety margin. With the
+ * warmup-skip + outlier rejection at record time, the window contains
+ * only steady-state render times. Median over that is the right answer. */
+static uint64_t fp_percentile_render_locked(uint32_t pct) {
+    (void)pct;  /* kept in signature for API stability — we now always use p50 */
+    uint32_t n = g_fp_render_count < FP_WINDOW ? g_fp_render_count : FP_WINDOW;
+    if (n < 4) return 16667;  /* insufficient data: assume 60 Hz */
+    uint64_t copy[FP_WINDOW];
+    for (uint32_t i = 0; i < n; i++) copy[i] = g_fp_render_times[i];
+    for (uint32_t i = 0; i + 1 < n; i++) {
+        for (uint32_t j = i + 1; j < n; j++) {
+            if (copy[i] > copy[j]) { uint64_t t = copy[i]; copy[i] = copy[j]; copy[j] = t; }
+        }
+    }
+    /* p50 with 15% upward bias for safety margin. */
+    uint64_t median = copy[n / 2];
+    return (median * 115) / 100;
+}
+static uint64_t fp_median_tick_locked(void) {
+    uint32_t n = g_fp_tick_count < FP_WINDOW ? g_fp_tick_count : FP_WINDOW;
+    if (n < 4) return 16667;
+    uint64_t copy[FP_WINDOW];
+    for (uint32_t i = 0; i < n; i++) copy[i] = g_fp_tick_deltas[i];
+    for (uint32_t i = 0; i + 1 < n; i++) {
+        for (uint32_t j = i + 1; j < n; j++) {
+            if (copy[i] > copy[j]) { uint64_t t = copy[i]; copy[i] = copy[j]; copy[j] = t; }
+        }
+    }
+    return copy[n / 2];
+}
+
+/* === JITTER TRACE ===
+ * Per-stage inter-event delta logging. Each tracer keeps a previous-timestamp
+ * and logs the delta in microseconds when an event fires. Use:
+ *     adb logcat -d | grep JITTER_TRACE > trace.txt
+ * Then awk or load into a spreadsheet to compare variance across stages.
+ *
+ * Stages on the layer side:
+ *   stage=present     — DXVK called vkQueuePresentKHR (one per game frame)
+ *   stage=wait_return — vkWaitForPresentKHR unblocked
+ *   stage=wait_block  — vkWaitForPresentKHR was called; reports how long
+ *                       it blocked before returning (separately from delta)
+ *   stage=tick        — release-reader thread observed MSG_TICK
+ * The Android side adds: recv, apply, onCommit. */
+static inline uint64_t mono_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)ts.tv_nsec / 1000ULL;
+}
+#define JTRACE(stage_str, prev_var_ptr, fmt, ...) do {                       \
+    uint64_t _now = mono_us();                                               \
+    uint64_t _prev = *(prev_var_ptr);                                        \
+    *(prev_var_ptr) = _now;                                                  \
+    if (_prev) {                                                             \
+        uint64_t _d = _now - _prev;                                          \
+        LOGI("JITTER_TRACE: stage=%s delta_us=%llu " fmt,                    \
+             (stage_str), (unsigned long long)_d, ##__VA_ARGS__);            \
+    }                                                                        \
+} while (0)
 
 /* ========================================================================
  * Layer chaining helper
@@ -219,15 +351,71 @@ static void *release_reader_thread(void *arg) {
             LOGW("release_reader_thread: recv ended (n=%zd: %s); exiting", n, strerror(errno));
             break;
         }
-        if (n != (ssize_t)sizeof(rel) || rel.type != MSG_RELEASE) continue;
+        if (n != (ssize_t)sizeof(rel)) continue;
+
+        /* MSG_VSYNC: from Android-side AChoreographer_postFrameCallback,
+         * sent once per real panel vsync independent of our present cadence.
+         * Stamps g_last_hardware_vsync_us so WFP's clock_nanosleep TIMER_ABSTIME
+         * has a phase reference.
+         *
+         * Anchor choice: we use recv-time (mono_us() at the moment we process
+         * the message). The IPC adds ~500 µs of mostly-stable latency, and
+         * EMPIRICALLY that gives the smoothest pacing on the Odin 2 Portal —
+         * waking exactly at the panel vsync (via the shipped frameTimeNanos)
+         * landed our subsequent ASurfaceTransaction apply too close to
+         * SurfaceFlinger's swap deadline, causing some frames to slip a
+         * vsync. The IPC delay was an accidental but useful headroom. The
+         * MSG_VSYNC payload still ships vsync_time_ns for future use but
+         * we don't read it for pacing. */
+        if (rel.type == MSG_VSYNC) {
+            uint64_t recv_us = mono_us();
+            pthread_mutex_lock(&g_release_mtx);
+            g_vsync_count++;
+            g_last_hardware_vsync_us = recv_us;
+            pthread_mutex_unlock(&g_release_mtx);
+            static uint64_t s_vsync_prev = 0;
+            JTRACE("vsync", &s_vsync_prev, "count=%llu",
+                   (unsigned long long)g_vsync_count);
+            continue;
+        }
+
+        /* MSG_TICK: from Android-side setOnCommit, sent once per real vsync.
+         * Drives g_display_count (the pacing signal for vkWaitForPresentKHR).
+         * Slot-freeing happens separately via MSG_RELEASE. */
+        if (rel.type == MSG_TICK) {
+            static uint64_t s_tick_prev = 0;
+            JTRACE("tick", &s_tick_prev, "count=%llu",
+                   (unsigned long long)(g_display_count + 1));
+            uint64_t now = mono_us();
+            pthread_mutex_lock(&g_release_mtx);
+            /* Track inter-tick interval for self-discovered vsync period.
+             * Filter outliers (<2ms or >50ms) to keep the median stable. */
+            if (g_fp_last_tick_for_period_us != 0) {
+                uint64_t d = now - g_fp_last_tick_for_period_us;
+                if (d >= 2000 && d <= 50000) {
+                    g_fp_tick_deltas[g_fp_tick_head] = d;
+                    g_fp_tick_head = (g_fp_tick_head + 1) % FP_WINDOW;
+                    if (g_fp_tick_count < FP_WINDOW) g_fp_tick_count++;
+                    g_fp_vsync_period_us = fp_median_tick_locked();
+                }
+            }
+            g_fp_last_tick_for_period_us = now;
+            g_display_count++;
+            pthread_cond_broadcast(&g_release_cv);
+            pthread_mutex_unlock(&g_release_mtx);
+            continue;
+        }
+
+        if (rel.type != MSG_RELEASE) continue;
         if (rel.slot_index >= AHB_MAX_IMAGES) continue;
 
         pthread_mutex_lock(&g_release_mtx);
         g_slot_free[rel.slot_index] = true;
 
-        /* If this release came from an onComplete (frame actually displayed),
-         * advance the vsync-paced display counter. Mailbox-drain releases
-         * (displayed=0) only free the slot. */
+        /* Fallback path: if Android-side has no setOnCommit (Android < 12),
+         * onComplete-driven MSG_RELEASE arrives with displayed=1 to act as
+         * the tick. With setOnCommit available, MSG_RELEASE always uses
+         * displayed=0 (slot freeing only) so we don't double-count. */
         if (rel.displayed) {
             g_display_count++;
         }
@@ -635,6 +823,23 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
     g_present_record_head = 0;
     g_max_completed_present_id = 0;
     g_display_count = 0;
+    /* Reset frame-pacing windows so a swapchain recreation starts learning
+     * fresh — the new swapchain may have different content / rate. */
+    for (uint32_t i = 0; i < FP_WINDOW; i++) {
+        g_fp_render_times[i] = 0;
+        g_fp_tick_deltas[i]  = 0;
+    }
+    g_fp_render_head  = g_fp_render_count = 0;
+    g_fp_render_seen  = 0;
+    g_fp_tick_head    = g_fp_tick_count   = 0;
+    g_fp_last_acquire_us         = 0;
+    g_fp_last_tick_for_period_us = 0;
+    g_fp_vsync_period_us         = 16667;
+    g_fp_last_wait_return_us     = 0;
+    /* Phase-anchor state: don't reset g_vsync_count itself (it's a monotonic
+     * absolute counter), but DO clear g_last_hardware_vsync_us so WFP's
+     * "is the Choreographer alive?" check starts from a known state. */
+    g_last_hardware_vsync_us     = 0;
     g_presented_ring[0] = g_presented_ring[1] = -1;
     g_presented_idx = 0;
     pthread_cond_broadcast(&g_release_cv);
@@ -787,6 +992,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_AcquireNextImageKHR(
         /* g_slot_free[ahb_idx] was already set false inside the locked section. */
         g_ahb_swapchain->current_image = (ahb_idx + 1) % image_count;
 
+        /* Frame pacing: stamp the moment DXVK starts working on this frame.
+         * Paired in QueuePresent to compute render time. */
+        pthread_mutex_lock(&g_release_mtx);
+        g_fp_last_acquire_us = mono_us();
+        pthread_mutex_unlock(&g_release_mtx);
+
         static int _acq_cnt = 0;
         ++_acq_cnt;
         /* Log every acquire for the first 30 frames so first-launch shader-compile
@@ -844,15 +1055,134 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_WaitForPresentKHR(
     uint64_t presentId, uint64_t timeout)
 {
     if (g_ahb_swapchain && g_real_swapchain_handle == swapchain) {
-        /* Return VK_SUCCESS immediately. Strict wait-on-onComplete pacing
-         * locks DXVK to 1-buffer-deep cycle, and SurfaceFlinger's onComplete
-         * lags apply by 1–2 vsyncs, capping framerate at half the panel rate
-         * (measured: 30 FPS on a 60 Hz mode). Proper fix is to use
-         * ASurfaceTransaction_setOnCommit (API 31+) for the vsync tick so
-         * Wine can pipeline frames, but that's a separate Android-side change.
-         * For now: instant-success keeps the working state. */
-        (void)presentId; (void)timeout;
-        return VK_SUCCESS;
+        /* === Pillar 2 — phase-anchored absolute sleep ===
+         *
+         * Each call wakes at the NEXT panel-vsync-aligned boundary, using:
+         *   - Phase reference: g_last_hardware_vsync_us, updated by the
+         *     release-reader thread on every MSG_VSYNC from the Android-side
+         *     AChoreographer callback. The IPC keeps the clock synchronized;
+         *     it does NOT gate the wait, so its delivery variance can't
+         *     affect wake precision.
+         *   - Wake mechanism: clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME),
+         *     a single syscall returning at the kernel scheduler's precision
+         *     with zero thread-hop variance.
+         *
+         * Design decisions:
+         *
+         *   1. NO render-time prediction. Earlier iterations used predicted
+         *      render time to scale intervals_needed (1×/2×/4× vsync). That
+         *      created the feedback loop: predicted climbed during startup
+         *      shader compiles, pacing slowed to 15 FPS, render times were
+         *      measured AGAINST the slowed pacing, predicted stayed high,
+         *      and recovery took ~40 seconds. We now ALWAYS target the next
+         *      vsync (or the one after, if we're already past it because
+         *      render ran long). Slow renders auto-pace via natural slot
+         *      back-pressure (Acquire blocks) and via missed-vsync drift.
+         *      No artificial cap, no recursive feedback.
+         *
+         *   2. Phase-anchored, not relative. target = g_last_hardware_vsync_us
+         *      + N × 16667 (smallest N s.t. target > now). Each call
+         *      recomputes the anchor fresh — drift can't accumulate.
+         *
+         *   3. Fallback to relative pacing when the vsync stream is silent
+         *      (very first present, scanout torn down). Same clock_nanosleep
+         *      primitive — just a different reference. */
+        uint64_t wait_entry_us = mono_us();
+
+        /* Prediction is kept for diagnostics only — does not influence pacing. */
+        pthread_mutex_lock(&g_release_mtx);
+        uint64_t predicted = fp_percentile_render_locked(50);  /* median + 15% bias */
+        uint64_t vsync_anchor = g_last_hardware_vsync_us;
+        uint64_t now_us = mono_us();
+        bool vsync_stream_live = (vsync_anchor != 0) &&
+                                 (now_us - vsync_anchor < 3 * 16667);
+        pthread_mutex_unlock(&g_release_mtx);
+
+        const uint64_t vsync_period_us = 16667;  /* 60 Hz panel; future: query */
+        VkResult result = VK_SUCCESS;
+
+        /* Compute absolute wake target. */
+        uint64_t target_us;
+        if (vsync_stream_live) {
+            /* Phase-anchored: target is the next panel-vsync boundary in the
+             * future, measured from the most recent hardware vsync we know
+             * about. The anchor is recv-time of MSG_VSYNC (NOT the shipped
+             * frameTimeNanos), which gives us implicit ~500 µs of SurfaceFlinger
+             * deadline margin — empirically the smoothest config on this SoC.
+             * See the MSG_VSYNC handler for rationale.
+             *
+             * The (target_us <= now_us) loop handles two cases:
+             *   - Normal: the next vsync is one period after the anchor.
+             *   - Catch-up: render took longer than one period, so we skip
+             *     ahead by additional periods until the target is genuinely
+             *     in the future. */
+            target_us = vsync_anchor + vsync_period_us;
+            while (target_us <= now_us) target_us += vsync_period_us;
+        } else if (g_fp_last_wait_return_us != 0) {
+            /* Fallback: relative pacing from the previous return. */
+            target_us = g_fp_last_wait_return_us + vsync_period_us;
+            if (target_us <= now_us) target_us = now_us;  /* don't drift backward */
+        } else {
+            /* Very first call. Return immediately so we don't stall on
+             * absent state; subsequent calls will be properly paced. */
+            target_us = now_us;
+        }
+
+        /* Honor caller's timeout. */
+        if (timeout == 0) {
+            /* DXVK occasionally polls with timeout=0; semantics is "return
+             * VK_TIMEOUT if not yet ready". With phase-anchored pacing we
+             * have nothing to "be ready for", so just return success. */
+        } else {
+            uint64_t deadline_us = (timeout == UINT64_MAX)
+                                   ? UINT64_MAX
+                                   : now_us + (timeout / 1000ULL);
+            if (target_us > deadline_us) {
+                target_us = deadline_us;
+                result = VK_TIMEOUT;
+            }
+        }
+
+        /* Absolute sleep. CLOCK_MONOTONIC matches mono_us(). */
+        if (target_us > now_us) {
+            struct timespec target_ts;
+            target_ts.tv_sec  = (time_t)(target_us / 1000000ULL);
+            target_ts.tv_nsec = (long)((target_us % 1000000ULL) * 1000ULL);
+            int rc;
+            while ((rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
+                                         &target_ts, NULL)) == EINTR) {
+                /* clock_nanosleep with ABSTIME re-uses the same target on
+                 * restart — no remainder tracking needed. */
+            }
+            (void)rc;  /* ignore other errors; we still mark return time */
+        }
+
+        uint64_t wait_return_us = mono_us();
+        g_fp_last_wait_return_us = wait_return_us;
+
+        /* Periodic visibility into pacing decisions. */
+        static int s_pace_log_cnt = 0;
+        if (++s_pace_log_cnt <= 5 || s_pace_log_cnt % 240 == 0) {
+            LOGI("frame_pacing: predicted_us=%llu vsync_us=%llu path=%s vsync_count=%llu (render_n=%u)",
+                 (unsigned long long)predicted, (unsigned long long)vsync_period_us,
+                 vsync_stream_live ? "phase-anchored" : "wall-clock-fallback",
+                 (unsigned long long)g_vsync_count,
+                 g_fp_render_count);
+        }
+
+        /* JITTER TRACE: how long this call blocked + delta-since-last-return. */
+        uint64_t wait_us = wait_return_us - wait_entry_us;
+        static uint64_t s_wait_prev = 0;
+        JTRACE("wait_return", &s_wait_prev, "wait_us=%llu presentId=%llu",
+               (unsigned long long)wait_us, (unsigned long long)presentId);
+
+        static int s_wait_cnt = 0;
+        if (++s_wait_cnt <= 10 || s_wait_cnt % 240 == 0) {
+            LOGI("layer_WaitForPresentKHR: presentId=%llu result=%d wait_us=%llu",
+                 (unsigned long long)presentId, (int)result,
+                 (unsigned long long)wait_us);
+        }
+        return result;
     }
     if (g_dev_dispatch.WaitForPresentKHR)
         return g_dev_dispatch.WaitForPresentKHR(device, swapchain, presentId, timeout);
@@ -895,6 +1225,44 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_QueuePresentKHR(
                 if (!g_saved_queue) g_saved_queue = queue;
 
                 uint32_t ahb_slot = pPresentInfo->pImageIndices[i];
+
+                /* JITTER TRACE: time between successive QueuePresent calls.
+                 * This is DXVK's effective render cadence as seen by us. */
+                {
+                    static uint64_t s_present_prev = 0;
+                    JTRACE("present", &s_present_prev, "slot=%u", ahb_slot);
+                }
+
+                /* Frame pacing: record render time (acquire → present).
+                 *
+                 * Two guards against poisoning the prediction window:
+                 *   1. Skip the first FP_WARMUP_FRAMES samples — startup
+                 *      hitches (shader compile, first-asset load) don't
+                 *      represent steady-state render time.
+                 *   2. Discard outliers above 6×vsync (~100ms). Real games
+                 *      never sustain <10 FPS render times; anything beyond
+                 *      that is a hitch we don't want to feed back into pacing.
+                 */
+                {
+                    uint64_t now = mono_us();
+                    pthread_mutex_lock(&g_release_mtx);
+                    if (g_fp_last_acquire_us != 0) {
+                        uint64_t rt = now - g_fp_last_acquire_us;
+                        uint64_t vsync_us = g_fp_vsync_period_us;
+                        if (vsync_us < 4000)  vsync_us = 16667;
+                        if (vsync_us > 33334) vsync_us = 33334;
+                        uint64_t outlier_cap = vsync_us * 6;  /* ~100ms @ 60Hz */
+                        g_fp_render_seen++;
+                        if (g_fp_render_seen > FP_WARMUP_FRAMES
+                            && rt > 0 && rt < outlier_cap) {
+                            g_fp_render_times[g_fp_render_head] = rt;
+                            g_fp_render_head = (g_fp_render_head + 1) % FP_WINDOW;
+                            if (g_fp_render_count < FP_WINDOW) g_fp_render_count++;
+                        }
+                    }
+                    g_fp_last_acquire_us = 0;
+                    pthread_mutex_unlock(&g_release_mtx);
+                }
 
                 /* Extract DXVK's VkPresentIdKHR (pNext chain). It carries one
                  * presentId per swapchain in pPresentIds[]. Record (id, slot)
