@@ -1373,9 +1373,36 @@ void VulkanRendererContext::destroyScanout() {
 
 void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int acquireFenceFd, int slotIndex, int x, int y, int w, int h, int bgraBytes) {
     if (!scanoutActive.load() || !scanoutGameSC || !ahb) {
-        RLOG("scanoutSetBuffer: SKIPPED active=%d sc=%p ahb=%p",
-            (int)scanoutActive.load(),scanoutGameSC,(void*)ahb);
+        RLOG("scanoutSetBuffer: SKIPPED active=%d sc=%p ahb=%p slot=%d",
+            (int)scanoutActive.load(),scanoutGameSC,(void*)ahb,slotIndex);
         if (acquireFenceFd >= 0) close(acquireFenceFd);
+        /* Send MSG_RELEASE for this slot so Wine's AHB pool doesn't count
+         * it as in-flight. Without this, even brief scanoutActive=false
+         * windows (lock/unlock, transient onPause/onResume cycles from
+         * Android lifecycle events) leak slots — after 4 consecutive
+         * skipped frames, Wine's vkAcquireNextImageKHR blocks on
+         * pthread_cond_wait forever waiting for releases that will never
+         * come, and the game freezes. The release is marked displayed=0
+         * so the layer's pacing logic doesn't tick its display counter
+         * for a frame that was never actually displayed.
+         *
+         * Note: there's a similar fix in applyScanoutBuffer's SKIPPED
+         * path for the case where the SC state changes between this
+         * function and apply — in practice the early-return here catches
+         * essentially all such events because scanoutGameSC is the first
+         * thing nulled when DirectCompositorComponent.onPause runs. */
+        if (slotIndex >= 0) {
+            int sockFd = scanoutSocketFd.load(std::memory_order_relaxed);
+            if (sockFd >= 0) {
+                struct { uint8_t type; uint32_t slot_index; int32_t release_fd;
+                         uint8_t displayed; uint64_t vsync_time_ns; } rel{};
+                rel.type = 2; // MSG_RELEASE
+                rel.slot_index = (uint32_t)slotIndex;
+                rel.release_fd = -1;
+                rel.displayed = 0;
+                send(sockFd, &rel, sizeof(rel), MSG_NOSIGNAL);
+            }
+        }
         return;
     }
     static int _scanoutBufCnt=0;
@@ -1573,6 +1600,37 @@ void VulkanRendererContext::applyScanoutBuffer() {
     int acquireFd = p.acquireFenceFd;
     if (!ahb || !scanoutGameSC) {
         if (acquireFd >= 0) close(acquireFd);
+        /* Critical: send MSG_RELEASE for this slot even though we couldn't
+         * apply the transaction. Otherwise Wine's AHB pool counts this
+         * slot as "in flight" forever — and after a few such skipped
+         * frames (4 with our default pool size), vkAcquireNextImageKHR
+         * blocks on pthread_cond_wait indefinitely. That's the freeze
+         * we hit when:
+         *   (a) the user locks the device — DirectCompositor.onPause
+         *       detaches scanoutGameSC, leaving us in this SKIPPED branch
+         *       for every frame until onResume reattaches.
+         *   (b) the user leaves a game idle for several minutes — Android
+         *       lifecycle events (battery optimizer, screen timeout) fire
+         *       transient onPause/onResume cycles that flip scanoutGameSC
+         *       to null for brief windows. Even a few-millisecond detach
+         *       can leak enough slots to deadlock the pool.
+         *
+         * The released slot is marked as a non-display release
+         * (displayed=0) so the layer's WaitForPresentKHR pacing logic
+         * doesn't tick the display counter for a frame that was never
+         * actually shown. */
+        if (p.slotIndex >= 0) {
+            int sockFd = scanoutSocketFd.load(std::memory_order_relaxed);
+            if (sockFd >= 0) {
+                struct { uint8_t type; uint32_t slot_index; int32_t release_fd;
+                         uint8_t displayed; uint64_t vsync_time_ns; } rel{};
+                rel.type = 2; // MSG_RELEASE
+                rel.slot_index = (uint32_t)p.slotIndex;
+                rel.release_fd = -1;
+                rel.displayed = 0;
+                send(sockFd, &rel, sizeof(rel), MSG_NOSIGNAL);
+            }
+        }
         return;
     }
 

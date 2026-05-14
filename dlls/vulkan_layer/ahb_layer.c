@@ -833,6 +833,35 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
             } else {
                 LOGI("layer_CreateSwapchainKHR: got %u trojan images for blit indirection",
                      g_trojan_image_count);
+                /* === FIX: cap AHB swapchain image_count to trojan count ===
+                 *
+                 * The AHB pool has up to AHB_MAX_IMAGES slots, but the real
+                 * driver may return fewer trojan images — FIFO swapchains
+                 * commonly get 2-3, MAILBOX/IMMEDIATE 3-4. If sc->image_count
+                 * exceeds g_trojan_image_count, layer_AcquireNextImageKHR can
+                 * return ahb_slot ≥ g_trojan_image_count where the per-slot
+                 * cmd_buf/fence is VK_NULL_HANDLE. The QueuePresent blit
+                 * branch is skipped, falls through to the fallback that
+                 * forwards the AHB WITHOUT doing trojan→AHB copy → receiver
+                 * displays whatever stale bytes the AHB happened to hold,
+                 * game appears frozen on the first frame that lands in an
+                 * orphan slot.
+                 *
+                 * This is why FIFO games (Vampire Survivors with FIFO + 2-3
+                 * trojan images) freeze in trojan-blit mode while MAILBOX
+                 * games (Broforce) work — MAILBOX gets enough trojan images
+                 * to cover all 4 AHB slots.
+                 *
+                 * Cap image_count so acquire only ever returns a slot that
+                 * has a valid trojan/cmd_buf/fence triple. Unused AHB slots
+                 * remain imported (memory waste only) — destroy walks them
+                 * via the AHB_MAX_IMAGES-bounded loop in vulkan_ahb.c with
+                 * NULL checks already in place. */
+                if (g_trojan_image_count > 0 && sc->image_count > g_trojan_image_count) {
+                    LOGW("layer_CreateSwapchainKHR: capping image_count %u -> %u (trojan limit, FIFO-fix)",
+                         sc->image_count, g_trojan_image_count);
+                    sc->image_count = g_trojan_image_count;
+                }
             }
 
             /* Create command pool + per-slot command buffers + per-slot fences for blit.

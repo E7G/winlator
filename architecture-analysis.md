@@ -1,8 +1,23 @@
 # Direct Android Compositing — Architecture Analysis
 
-This document reflects the actual state of the codebase after the debugging
-work in May 2026 that took the implementation from "Broforce only" to
-"all tested Vulkan games run."
+This document reflects the state of the codebase after the May 2026
+debugging series. The pipeline now supports **three** user-selectable modes
+exposed via a per-container / per-shortcut **Graphics Pipeline** dropdown:
+
+- **Quality (direct-render)** — DXVK renders straight into AHB-backed
+  `VkImage`s. No intermediate copy. Default for new containers.
+- **Performance (trojan-blit)** — DXVK renders into a device-local trojan
+  image and the layer blits it to the AHB on present.
+- **Native (X11)** — DAC layer disabled via `DISABLE_AHB_LAYER=1`; game
+  runs through the original `winex11` path. Compatibility fallback.
+
+The choice is wired through `Container.graphicsPipeline` (per-container
+default) and an optional per-shortcut override stored in the shortcut's
+`graphicsPipeline=` extra. `GuestProgramLauncherComponent` resolves the
+value and re-asserts the relevant env vars **after** the shortcut's
+`envVars=` merge so the spinner is the final authority (legacy
+hand-written `WINLATOR_AHB_DIRECT_RENDER=...` lines no longer pin the
+mode).
 
 ---
 
@@ -14,13 +29,17 @@ Replace the X11-routed Vulkan present path:
 DXVK → Wine X11 socket → Java X11 server → GL compositor → SurfaceFlinger
 ```
 
-with a zero-copy direct compositing path:
+with a zero-copy direct compositing path. Two flavours coexist:
 
 ```
-DXVK → trojan swapchain → blit to AHardwareBuffer → SurfaceControl → SurfaceFlinger
+Quality:      DXVK → AHB-backed VkImage  →  SurfaceControl → SurfaceFlinger
+                    (zero-copy, fence-only submit signals SYNC_FD)
+Performance:  DXVK → trojan VkImage → vkCmdBlitImage → AHB → SurfaceControl → SF
+                    (one blit, more driver-friendly source image)
 ```
 
-OpenGL games (virgl, wined3d) keep using the X11 path unchanged.
+OpenGL games (virgl, wined3d) and Native-pipeline Vulkan games keep using
+the X11 path unchanged.
 
 ---
 
@@ -89,22 +108,88 @@ believed the swapchain to be (FIFO) and what the underlying driver had
 honoring DXVK's requested mode and creating the trojan with whatever
 DXVK asked for. No behavioral change observed.
 
-### Blit-to-AHB indirection
+### Blit-to-AHB indirection (Performance mode)
 
 The first version of `layer_QueuePresentKHR` was missing the actual blit —
 the IPC plumbing was complete but no `vkCmdCopyImage` was recorded.
 Adding `vkCmdCopyImage` made games run, but with **red and blue swapped**:
 DXVK renders into a `B8G8R8A8_UNORM` image, and `vkCmdCopyImage` is a
-byte-level memcpy. The AHB's native HAL format is `RGBA_8888`, so
-SurfaceFlinger interpreted the bytes in the wrong channel order.
+byte-level memcpy. The AHB's native HAL format was originally `RGBA_8888`,
+so SurfaceFlinger interpreted the bytes in the wrong channel order.
 
-**The fix that worked:** Change the AHB-side `VkImage` import format to
-`VK_FORMAT_R8G8B8A8_UNORM` (matching the AHB's native layout) and switch
-the blit from `vkCmdCopyImage` to `vkCmdBlitImage`. `BlitImage` is
-*format-aware* — it reads source pixels with BGRA semantics and writes
-destination pixels with RGBA semantics, performing the channel swap as
-a side effect of the format reinterpretation. Single-line change with a
-clean Vulkan-spec basis.
+**Two successive fixes, both in production now:**
+
+1. Use `vkCmdBlitImage` (format-aware) instead of `vkCmdCopyImage`. Reading
+   the source as BGRA and writing the destination as RGBA performs the
+   channel swap implicitly via format reinterpretation.
+2. **Unify the AHB pool to `HAL_PIXEL_FORMAT_BGRA_8888`** and import the
+   AHB-side `VkImage` as `VK_FORMAT_B8G8R8A8_UNORM` to match. Both ends
+   of the blit are now the same format, so the operation degenerates to
+   a byte copy — but the byte layout matches what SurfaceFlinger expects
+   when reading a HAL_BGRA buffer. No channel reinterpretation needed.
+
+The unified BGRA pool is what direct-render mode also requires: DXVK
+writes BGRA bytes directly into the AHB, the AHB is HAL_BGRA, and the
+receiver displays it with no per-frame format-aware blit. The
+`bgra_bytes` flag in `present_msg` (always 1 after unification) tells
+the receiver to treat the buffer as BGRA-ordered bytes.
+
+### Direct-render mode (Path 3)
+
+In addition to trojan-blit, the layer now supports a **direct-render** mode
+(`WINLATOR_AHB_DIRECT_RENDER=1`, the default since Container's
+`DEFAULT_GRAPHICS_PIPELINE = "quality"`). Here the AHB-backed `VkImage`s
+are returned to DXVK directly from `vkGetSwapchainImagesKHR` — DXVK
+renders into them with no intermediate buffer.
+
+**No trojan swapchain is created at all** in this mode. The "synthetic"
+`VkSwapchainKHR` handle returned to DXVK is just a pointer to the
+layer's own `wine_vk_swapchain` struct. DXVK's swapchain operations
+(`Acquire`, `QueuePresent`, `WaitForPresent`, `Destroy`) are all
+intercepted by the layer's `g_real_swapchain_handle` check; the real
+driver never sees them.
+
+**The present-side work** reduces to: reset a per-slot
+SYNC_FD-exportable fence, submit an *empty* command buffer that waits
+on DXVK's render-complete semaphores and signals the fence, then ship
+the fence as a SYNC_FD via `wine_ahb_queue_present`. No barriers, no
+blit, ~1 ms of GPU work saved per frame plus no trojan-image memory
+overhead at swapchain creation.
+
+Trojan-blit is kept as a Performance-mode option because:
+- Some games with restrictive `imageUsage` flags on their swapchain
+  request can't be served directly from AHB (which we always create
+  with `COLOR_ATTACHMENT | TRANSFER_SRC | TRANSFER_DST`).
+- On certain SoC/driver combos, the AHB-as-render-target path has a
+  slightly higher per-frame cost than trojan-blit, where the trojan is
+  a regular device-local image and the blit is a single same-format
+  copy.
+
+The two modes share all infrastructure except the `QueuePresent` work
+and the `GetSwapchainImagesKHR` return path. They live behind a single
+`g_direct_render_mode` boolean set from the env var at device creation.
+
+### FIFO image-count cap (trojan-blit only)
+
+The AHB pool has 4 slots, but the real (trojan) swapchain returns
+whatever the driver chooses — typically **2-3 for FIFO** present mode,
+**3-4 for MAILBOX/IMMEDIATE**. Before this fix, `layer_AcquireNextImageKHR`
+could return an `ahb_slot ≥ g_trojan_image_count` where the per-slot
+`g_copy_cmd_bufs[slot]` and `g_copy_fences[slot]` were `VK_NULL_HANDLE`.
+The blit branch in `QueuePresent` was then skipped, falling through to
+the fallback that forwards the AHB to the receiver **without doing the
+trojan→AHB copy**. The receiver displayed stale bytes — game appeared
+frozen on the first frame that landed in an orphan slot.
+
+This matched Vampire Survivors' (FIFO) freeze-at-start signature while
+Broforce (IMMEDIATE) ran fine. Direct-render mode is unaffected
+because there's no trojan and no per-slot blit infrastructure.
+
+**Fix:** After creating the trojan and resolving its image count, cap
+`sc->image_count = min(sc->image_count, g_trojan_image_count)`. Unused
+imported AHB slots remain in memory (cheap) and the `wine_ahb_destroy_swapchain`
+loop was widened to iterate `AHB_MAX_IMAGES` with NULL checks so the
+extra slots get freed at swapchain teardown.
 
 ### Per-slot blit resources and synchronization
 
@@ -168,58 +253,81 @@ swapchain's presentId was never signaled, and DXVK waited forever.
 — the present really did happen, just through the DAC path instead of
 the real swapchain. All FIFO games then progressed past frame 3.
 
-### Frame pacing — attempted real `vkWaitForPresentKHR` (reverted)
+### Frame pacing — current state: phase-anchored absolute sleep
 
-After getting games to run, motion jitter remained. The hypothesis: our
-return-instant `vkWaitForPresentKHR` lets DXVK race ahead of vsync; if
-we made it actually wait for SurfaceFlinger's `onComplete`, DXVK would
-be paced to real display timing.
+`layer_WaitForPresentKHR` is no longer a no-op. After two failed
+release-chain-driven attempts (documented below), the current
+implementation uses a self-contained pacing primitive that doesn't
+depend on the IPC release chain or DXVK's render time at all.
 
-Two attempts, both unsuccessful:
+**Current implementation:**
 
-**Attempt 1 — track `presentId` → slot via a ring buffer, mark the
-newest matching record completed on each `MSG_RELEASE`, advance
-`max_completed_present_id`, have `vkWaitForPresentKHR(N)` block on it.**
-This caused "time-travel" — enemies moving backward briefly during
-gameplay. Root cause: `MSG_RELEASE` doesn't carry a `presentId`, so the
-"mark newest matching slot as the completed presentId" guess advanced
-`max_completed_present_id` ahead of the actual displayed frame. DXVK
-saw multiple waits return at once, submitted bursts of frames, mailbox
-dropped them non-monotonically, and the game's dt-based physics
+- `layer_WaitForPresentKHR` is intercepted for any swapchain matching
+  `g_real_swapchain_handle` (true for both direct-render and trojan-blit
+  modes).
+- On each call it computes an absolute target wake time:
+  - **Phase-anchored path**: `target = g_last_hardware_vsync_us +
+    N × 16667` where N is the smallest integer making `target` lie in
+    the future. The anchor `g_last_hardware_vsync_us` is updated by the
+    release-reader thread whenever Android delivers an `MSG_VSYNC`
+    message (driven by an `AChoreographer` callback on the Java side).
+    Live as long as a vsync arrived in the last 3 periods.
+  - **Wall-clock fallback**: when no recent vsync is available, target
+    is `g_fp_last_wait_return_us + 16667`. Same precision, just no
+    panel-aligned phase.
+- The wait is implemented as a single
+  `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &target, NULL)`
+  syscall, restarted on `EINTR`. This gives kernel-scheduler-precision
+  wake-ups with no thread-hop variance.
+
+What this is **not** doing:
+- It does not track `presentId` completion. DXVK's `presentId` is
+  recorded in `g_present_records` (for diagnostic use only) but the
+  wait doesn't block on it.
+- It does not predict DXVK's render time and scale the wait. An earlier
+  iteration did, which created a feedback loop during shader compile
+  (predicted climbed → pacing slowed → render times measured against
+  the slowed pacing → predicted stayed high → 40 s recovery). The
+  current implementation always targets the next vsync.
+
+Effect: `vkWaitForPresentKHR` returns on a panel-vsync-aligned boundary
+roughly one period after the previous return, which DXVK uses to pace
+its render submission. Slow renders auto-throttle via Acquire's
+back-pressure on full pipelines, not via WaitForPresent.
+
+**Earlier attempts that didn't work** (kept here so the design history
+is recoverable):
+
+**Attempt 1 — track `presentId` → slot via a ring buffer, advance
+`max_completed_present_id` on each `MSG_RELEASE`, block `WaitForPresentKHR`
+on it.** Caused "time-travel" (enemies moving backward briefly) because
+`MSG_RELEASE` doesn't carry a `presentId` — the "mark newest matching
+slot as completed" guess advanced the counter ahead of the actual
+displayed frame. DXVK saw multiple waits return at once, submitted bursts
+of frames, mailbox dropped non-monotonically, the game's dt-based physics
 mis-extrapolated.
 
 **Attempt 2 — extend the IPC protocol.** Added `present_id` to
-`MSG_PRESENT` (so the Wine side passes DXVK's `VkPresentIdKHR` through)
-and a `displayed` flag to `MSG_RELEASE` (1 for `onComplete`-driven
-releases, 0 for mailbox-drain drops). The layer's release-reader thread
-increments a `g_display_count` only on `displayed=1` releases. Required
-synchronized rebuilds of both `libahb_layer.so` and `libwinlator.so`.
-`vkWaitForPresentKHR` would then block until `display_count` advanced
-one tick.
+`MSG_PRESENT` and a `displayed` flag to `MSG_RELEASE` (1 for
+`onComplete`-driven releases, 0 for mailbox-drain drops). The
+release-reader thread bumped `g_display_count` only on `displayed=1`
+releases; `WaitForPresentKHR` blocked until it ticked.
 
-Result: framerate dropped to a hard 30 FPS, locked to a single slot
-(slot 3 in every present). Why:
-
+Result: framerate dropped to a hard 30 FPS locked to a single slot.
+Why:
 - DXVK's strict FIFO loop is **1-buffer-deep**: acquire → render →
   present → wait → repeat.
-- SurfaceFlinger's `onComplete` fires ~1 vsync **after** apply (the
-  buffer is "displayed" only after being latched at the next vsync).
-- Each Wine iteration therefore takes ≥ 2 vsyncs: render + apply + 1
-  vsync of latency.
-- With 1-buffer cycling, only the most-recently-released slot is ever
-  free, so Wine reuses the same slot indefinitely. The pipelining that
-  FIFO normally allows (multiple frames in flight) never materializes.
+- `onComplete` fires ~1 vsync after `apply` (the buffer is "displayed"
+  only after being latched at the next vsync).
+- Each Wine iteration therefore takes ≥ 2 vsyncs.
+- With 1-buffer cycling, only the most-recently-released slot is free,
+  so Wine reuses the same slot indefinitely.
 
-The real fix would have been to use `ASurfaceTransaction_setOnCommit`
-(API 31+, fires at apply rather than at display) to drive the
-`display_count` tick, decoupling pacing from the slot-release chain.
-This is a bigger Android-side change (new `MSG_TICK` message type,
-display thread needs new callback wiring) and wasn't undertaken.
-
-**Reverted** `vkWaitForPresentKHR` to instant-`VK_SUCCESS`. The IPC
-extensions (`present_id` field, `displayed` flag) are kept in the
-protocol because they're useful infrastructure for the future
-`setOnCommit` work — they just go unused at the moment.
+The release-chain pacing was abandoned for the phase-anchored approach
+above. The IPC extensions (`present_id` field on `MSG_PRESENT`,
+`displayed` flag on `MSG_RELEASE`) are kept in the protocol because
+they're useful for any future `ASurfaceTransaction_setOnCommit`-driven
+work, but they're not consumed by the current pacing.
 
 ### Release-reader thread refactor (kept)
 
@@ -296,10 +404,13 @@ GuestProgramLauncherComponent.java:381-386    — adds libahb_preload to
 struct present_msg {
     uint8_t  type;          // MSG_PRESENT (1)
     uint32_t slot_index;    // 0..AHB_MAX_IMAGES-1
-    int32_t  acquire_fd;    // blit completion sync_fd; -1 if none
+    int32_t  acquire_fd;    // SYNC_FD; render-complete (direct-render)
+                            // or blit-complete (trojan-blit); -1 if none
     int32_t  dst_x, dst_y, dst_w, dst_h;
     uint64_t present_id;    // DXVK's VkPresentIdKHR; 0 if not provided
                             // (carried for future setOnCommit pacing)
+    uint8_t  bgra_bytes;    // always 1 since pool unified to HAL_BGRA;
+                            // tells receiver to display BGRA-ordered bytes
 };
 
 struct release_msg {
@@ -309,7 +420,14 @@ struct release_msg {
     uint8_t  displayed;     // 1 = onComplete (actual vsync tick)
                             // 0 = mailbox drop (slot freed, not displayed)
                             // (carried for future setOnCommit pacing)
+    uint64_t vsync_time_ns; // 0 unless type == MSG_VSYNC
 };
+
+// MSG_VSYNC (3) — same struct as release_msg, sent by Android's
+// AChoreographer callback. The release-reader thread treats it as a
+// pure timekeeping signal: updates g_last_hardware_vsync_us = mono_us()
+// (NOT vsync_time_ns — recv time gives implicit SF deadline margin),
+// does not touch slot state. Drives the phase-anchored WaitForPresent.
 ```
 
 ### Layer's intercepted functions
@@ -336,16 +454,24 @@ layer_AcquireNextImageKHR                       — pick a free slot from g_slot
                                                   (mailbox-style, blocking on cv
                                                   when saturated; FIFO games
                                                   enforce extra back-pressure)
-layer_QueuePresentKHR                           — extract presentId from pNext,
-                                                  blit trojan → AHB with channel
-                                                  swap (BlitImage, format-aware),
-                                                  submit blit on DXVK's queue
-                                                  waiting on its render-complete
-                                                  semaphore, send present_msg to
-                                                  Android with sync_fd
-layer_WaitForPresentKHR                         — returns VK_SUCCESS immediately
-                                                  for trojan swap (proper pacing
-                                                  would require setOnCommit work)
+layer_QueuePresentKHR                           — extract presentId from pNext.
+                                                  Direct-render: submit zero-cmd
+                                                  fence-only signal waiting on
+                                                  DXVK's render-complete semaphore.
+                                                  Trojan-blit: record per-slot
+                                                  command buffer with barriers +
+                                                  same-format vkCmdBlitImage
+                                                  (trojan B8G8R8A8 → AHB
+                                                  B8G8R8A8), submit waiting on
+                                                  DXVK's semaphore.
+                                                  Both: ship sync_fd via
+                                                  wine_ahb_queue_present.
+layer_WaitForPresentKHR                         — phase-anchored vsync alignment
+                                                  via clock_nanosleep(ABSTIME).
+                                                  Anchor updated by MSG_VSYNC
+                                                  on release-reader thread.
+                                                  See "Frame pacing — current
+                                                  state" above.
 layer_QueueSubmit                               — diagnostic wrapper; logs and
                                                   forwards (dispatch-table patch
                                                   for this fails, so DXVK's
@@ -374,18 +500,31 @@ need_block =
 
 ```
 extract present_id from VkPresentIdKHR pNext
-wait/reset per-slot fence (slot N's previous blit must be done; release
-                           chain guarantees this — when slot N is reusable,
-                           SurfaceFlinger already consumed it)
-record blit command buffer:
-  barrier  trojan: PRESENT_SRC_KHR  → TRANSFER_SRC_OPTIMAL
-  barrier  AHB:    UNDEFINED        → TRANSFER_DST_OPTIMAL
-  vkCmdBlitImage trojan → AHB  (format-aware, R↔B handled implicitly)
-  barrier  trojan: TRANSFER_SRC_OPTIMAL → PRESENT_SRC_KHR (restore for DXVK)
-  barrier  AHB:    TRANSFER_DST_OPTIMAL → GENERAL          (for SF handoff)
-submit blit waiting on pPresentInfo->pWaitSemaphores, signaling fence
+reset per-slot fence (release chain guarantees previous use is done)
+
+if g_direct_render_mode:
+    # Direct-render: DXVK already wrote final image into AHB. Just turn
+    # render-complete semaphores into a SYNC_FD.
+    submit ZERO command buffers
+        wait on pPresentInfo->pWaitSemaphores (BOTTOM_OF_PIPE)
+        signal per-slot fence (SYNC_FD-exportable)
+else if trojan-blit infrastructure exists for this slot:
+    record per-slot command buffer:
+      barrier  trojan: PRESENT_SRC_KHR  → TRANSFER_SRC_OPTIMAL
+      barrier  AHB:    UNDEFINED        → TRANSFER_DST_OPTIMAL
+      vkCmdBlitImage trojan → AHB  (both BGRA, NEAREST; effective byte copy)
+      barrier  trojan: TRANSFER_SRC_OPTIMAL → PRESENT_SRC_KHR (restore for DXVK)
+      barrier  AHB:    TRANSFER_DST_OPTIMAL → GENERAL          (for SF handoff)
+    submit cmd buffer
+        wait on pPresentInfo->pWaitSemaphores (TRANSFER stage)
+        signal fence
+else:
+    # Fallback (no per-slot resources): drain semaphores, no copy.
+    # Only reachable if FIFO cap path failed; should be unreachable now.
+    submit empty drain submit with NULL fence
+
 update g_presented_ring (history of last 2 slots, used by acquire bias)
-wine_ahb_queue_present(swap, queue, slot, fence, presentId)
+wine_ahb_queue_present(swap, queue, slot, fence, presentId, bgra_bytes=1)
     → exports fence as SYNC_FD via vkGetFenceFdKHR
     → sends present_msg over socket with sync_fd as SCM_RIGHTS
 ```
@@ -438,32 +577,31 @@ loop:
 
 ## Status: which games work
 
-Tested on Odin 2 Portal, Android 13, Adreno 740, Proton 9.0, DXVK 2.x:
+Tested on Odin 2 Portal, Android 13, Adreno 740, Proton 9.0, DXVK 2.x.
+"Q" = Quality (direct-render), "P" = Performance (trojan-blit), "N" =
+Native X11 (DAC layer disabled).
 
-| Game | Mode | Status |
-|---|---|---|
-| Broforce | IMMEDIATE | ✅ runs, 60 FPS, some motion jitter |
-| Vampire Survivors | FIFO | ✅ runs (after present_wait fix), some jitter |
-| Hollow Knight | FIFO | ✅ runs (after present_wait fix) |
-| GTA4 | FIFO | ✅ runs (after present_wait fix) |
-| Megabonk | FIFO | ✅ runs (after present_wait fix) |
+| Game | Present mode | Q | P | N | Notes |
+|---|---|---|---|---|---|
+| Broforce | IMMEDIATE | ✅ 60 fps | ✅ 60 fps | ✅ | Both DAC modes jitter-free after pacing rewrite |
+| Vampire Survivors | FIFO | ✅ 60 fps | ✅ 60 fps | ✅ | P required the FIFO image-count cap to stop the freeze-at-start |
+| Hollow Knight | FIFO | ✅ | ✅ | ✅ | |
+| GTA4 | FIFO | ✅ | ✅ | ✅ | |
+| Megabonk | FIFO | ⚠️ game-side hang | ⚠️ game-side hang | 💥 Unity crash | Game-side incompatibility (Unity + Steamworks SDK + Rewired plugin from SD-card); not a Winlator regression. Both DAC modes presented 2000+ steady frames before the game logic stopped advancing. Native run triggered `UnityCrashHandler64.exe` ~12 s in. |
 
 ---
 
 ## Known issues / future work
 
-1. **Frame pacing jitter.** Visible motion irregularity especially during
-   character movement. Root cause: DXVK renders at variable speed (15–30
-   ms per frame from box64 + shader compile overhead), `vkWaitForPresentKHR`
-   returns instantly so DXVK doesn't pace itself, and the DAC path has
-   no compositor-side smoothing (which the X11 path provided as a side
-   effect of its extra latency). The architecturally correct fix is to
-   drive `g_display_count` from `ASurfaceTransaction_setOnCommit` (API
-   31+) and have `vkWaitForPresentKHR` wait on it. Requires:
-   - New `MSG_TICK` IPC message type
-   - Display thread registers `setOnCommit` callback that sends `MSG_TICK`
-   - Release-reader thread treats `MSG_TICK` as the pacing signal
-   - `layer_WaitForPresentKHR` waits on `g_display_count`
+1. **Frame pacing jitter — substantially reduced, not eliminated.** The
+   `clock_nanosleep(ABSTIME)` + MSG_VSYNC phase anchor rewrite produced
+   the largest single jitter improvement so far; on Broforce and the
+   FIFO test set, motion now matches what the X11 path delivered. Any
+   remaining variance comes from DXVK render-time variance (box64 +
+   shader compile) rather than from layer-side pacing. The
+   `setOnCommit`-driven model (display-tick rather than vsync-tick)
+   remains a worthwhile follow-up if a game with strict 1-frame-input
+   tolerance shows up.
 
 2. **HUD FPS counter shows 0 under DAC.** `directFrameCount` in
    `VulkanRendererContext` ticks per frame, but `WinlatorHUD.onFrame()`
@@ -498,18 +636,55 @@ Tested on Odin 2 Portal, Android 13, Adreno 740, Proton 9.0, DXVK 2.x:
    interception would follow the same pattern as `vkWaitForPresentKHR`
    (return success / dummy data).
 
+7. **`XServerDisplayActivity.exit()` busy-wait.** Lines ~634-638 spin
+   on `ProcessHelper.listRunningWineProcesses().isEmpty()` with a
+   1.5 s timeout but no `Thread.sleep` in the loop, blocking the UI
+   thread. Reproducible as "Winlator freezes when I exit via the
+   sidebar." Fix: add `Thread.sleep(50)` per iteration. Not a DAC
+   issue (pre-existing) but tracked here because the freeze is what
+   users see.
+
 ---
 
-## Key lesson
+## Key lessons
 
-When a Vulkan layer replaces the implementation of a swapchain extension
-function (here `vkQueuePresentKHR`), it must also handle every dependent
-function that the extension contract introduces. `VK_KHR_present_wait`
-defines `vkWaitForPresentKHR`; replacing present without also handling
-the wait broke FIFO games for weeks. The same pattern will recur for any
-future extension that creates an async "the present reached the display"
-expectation.
+**1. A swapchain-extension override must cover the whole contract.** When
+a Vulkan layer replaces the implementation of `vkQueuePresentKHR`, it
+must also handle every dependent function the extension introduces.
+`VK_KHR_present_wait` defines `vkWaitForPresentKHR`; replacing present
+without also handling the wait broke FIFO games for weeks. The same
+pattern will recur for any future extension that creates an async "the
+present reached the display" expectation. The diagnostic that finally
+exposed it was DXVK's own `info`-level log listing the enabled extensions
+— enable `DXVK_LOG_LEVEL=info` first for any hang of this shape.
 
-The diagnostic that finally exposed this was DXVK's own `info`-level log,
-which listed the enabled extensions. Without it we'd still be guessing.
-For any future hang of this shape, enable `DXVK_LOG_LEVEL=info` first.
+**2. The interceptor's index space must match the host's index space.**
+The trojan-blit FIFO freeze on Vampire Survivors came from
+`layer_AcquireNextImageKHR` returning AHB-pool indices (0-3) while the
+real swapchain had a smaller image count (2-3 for FIFO). Slots beyond
+the trojan count had `VK_NULL_HANDLE` per-slot resources; the present
+fell through to a fallback that shipped stale AHBs. A layer that
+fabricates its own buffer pool must clamp its exposed index space to
+the host's, not assume they match.
+
+**3. Format-aware blit ≠ format-correct AHB.** Initial trojan-blit used
+`vkCmdBlitImage` to swap R↔B implicitly between a BGRA source and an
+RGBA AHB. That worked, but the moment a second pipeline (direct-render)
+also wanted to write into the same AHB pool, the asymmetry forced
+either a different pool per mode or per-frame swapping. Unifying the
+AHB pool to `HAL_PIXEL_FORMAT_BGRA_8888` and importing as
+`VK_FORMAT_B8G8R8A8_UNORM` made both pipelines see the same byte
+layout, and the `present_msg.bgra_bytes` flag tells the receiver to
+display it as such. Simpler infrastructure, fewer edge cases.
+
+**4. The UI source of truth must be enforced after env-var merges.**
+Adding the Graphics Pipeline dropdown was straightforward; making it
+actually win against legacy shortcut envVars was not. The shortcut's
+hand-written `envVars=WINLATOR_AHB_DIRECT_RENDER=1` line was being
+merged in *after* our pipeline-derived value, silently pinning the
+mode regardless of the spinner. Pattern: any setting controlled by a
+UI element must be re-asserted in `GuestProgramLauncherComponent`
+after the `envVars.putAll(this.envVars)` merge. A single
+`Log.i("Graphics Pipeline resolved: ...")` line on launch made the
+problem visible — without it the bug would have looked like "the modes
+do the same thing."

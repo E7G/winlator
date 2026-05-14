@@ -314,9 +314,13 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
  
         envVars.put("ANDROID_SYSVSHM_SERVER", rootDir.getPath() + UnixSocketConfig.SYSVSHM_SERVER_PATH);
         envVars.put("ANDROID_AHB_SERVER", rootDir.getPath() + AHBSocketServerComponent.AHB_SOCKET_PATH);
-        envVars.put("ENABLE_AHB_LAYER", "1");
         envVars.put("VK_LAYER_PATH", rootDir.getPath() + "/usr/share/vulkan/implicit_layer.d");
-        envVars.put("VK_INSTANCE_LAYERS", "VK_LAYER_WINLATOR_ahb_direct");
+        // NOTE: The Graphics Pipeline env vars (ENABLE_AHB_LAYER /
+        // DISABLE_AHB_LAYER / VK_INSTANCE_LAYERS / WINLATOR_AHB_DIRECT_RENDER)
+        // are assigned AFTER `envVars.putAll(this.envVars)` below — that's the
+        // only way to guarantee the spinner wins over legacy hand-written
+        // values in the shortcut's `envVars=` field. See the block right
+        // after the putAll for the actual policy.
 
         // Verbose Vulkan loader + Wine debug logging (only in debug builds)
         if (true) { // BuildConfig.DEBUG
@@ -398,6 +402,54 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         if (this.envVars != null) {
             envVars.putAll(this.envVars);
         }
+
+        // === Graphics Pipeline (final authority) ==========================
+        //
+        // Resolved AFTER the shortcut/container `envVars=` merge above so the
+        // spinner ALWAYS wins. Legacy shortcuts saved before this feature
+        // existed often carry a hand-written WINLATOR_AHB_DIRECT_RENDER=1 in
+        // their envVars field — those got merged in by the putAll just above
+        // and would otherwise pin the pipeline to one mode regardless of the
+        // dropdown choice. Re-asserting here makes the spinner the source of
+        // truth.
+        //
+        //   "quality"     → DAC layer ON, WINLATOR_AHB_DIRECT_RENDER=1
+        //                   DXVK renders DIRECTLY into AHardwareBuffers;
+        //                   SurfaceFlinger composites via hardware overlay.
+        //                   Zero-jitter motion, lowest latency.
+        //   "performance" → DAC layer ON, WINLATOR_AHB_DIRECT_RENDER=0
+        //                   Trojan-blit (DXVK → device-local image → AHB).
+        //                   Higher steady FPS with some motion jitter.
+        //   "native"      → DAC layer OFF (DISABLE_AHB_LAYER=1).
+        //                   Game runs through the original Ludashi X11 path
+        //                   with no AHB interception — classic compositor.
+        //                   Compatibility fallback for misbehaving games.
+        //
+        // Default is Container.DEFAULT_GRAPHICS_PIPELINE = "quality".
+        // Shortcut-level override wins (same pattern as audioDriver/emulator).
+        String graphicsPipeline = container.getGraphicsPipeline();
+        if (shortcut != null) {
+            graphicsPipeline = shortcut.getExtra("graphicsPipeline",
+                    shortcut.container.getGraphicsPipeline());
+        }
+        if (Container.GRAPHICS_PIPELINE_NATIVE.equals(graphicsPipeline)) {
+            // Tell the Vulkan loader to skip the implicit AHB layer via the
+            // disable_environment key declared in ahb_layer.json. Strip any
+            // legacy enable-side vars the shortcut/container may have set.
+            envVars.put("DISABLE_AHB_LAYER", "1");
+            envVars.remove("ENABLE_AHB_LAYER");
+            envVars.remove("VK_INSTANCE_LAYERS");
+            envVars.remove("WINLATOR_AHB_DIRECT_RENDER");
+        } else {
+            envVars.remove("DISABLE_AHB_LAYER");
+            envVars.put("ENABLE_AHB_LAYER", "1");
+            envVars.put("VK_INSTANCE_LAYERS", "VK_LAYER_WINLATOR_ahb_direct");
+            envVars.put("WINLATOR_AHB_DIRECT_RENDER",
+                    Container.GRAPHICS_PIPELINE_PERFORMANCE.equals(graphicsPipeline) ? "0" : "1");
+        }
+        Log.i("GuestLauncher", "Graphics Pipeline resolved: " + graphicsPipeline
+                + " (DAC layer " + (Container.GRAPHICS_PIPELINE_NATIVE.equals(graphicsPipeline) ? "DISABLED" : "ENABLED")
+                + ", WINLATOR_AHB_DIRECT_RENDER=" + envVars.get("WINLATOR_AHB_DIRECT_RENDER") + ")");
 
         String emulator = container.getEmulator();
         if (shortcut != null)

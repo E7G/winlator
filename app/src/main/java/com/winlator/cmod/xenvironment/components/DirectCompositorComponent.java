@@ -68,9 +68,14 @@ public class DirectCompositorComponent extends EnvironmentComponent {
         renderer.setDirectCompositor(this);
         renderer.setAHBPool(pool);
         // NOTE: Do NOT call renderer.setNativeMode(true) here.
-        // nativeMode will be activated by VulkanRenderer when the first direct frame
-        // is actually delivered by the Wine Vulkan WSI. Until then, the XServer path
-        // remains active so the desktop is visible.
+        // nativeMode is for the legacy submitDirectFrame() path that's
+        // driven from Java when a single AHB is pushed per frame. The
+        // recv-thread DAC pipeline (the modern path) calls
+        // renderer->scanoutSetBuffer from C++ and never sets nativeMode.
+        // VulkanRenderer's surface-reattach logic uses isActive() on
+        // this component (in addition to nativeMode) to decide whether
+        // SCs need to be recreated after lock/unlock, so the flag below
+        // doubles as the recv-thread DAC's "I'm active" signal.
         active = true;
         Log.i(LOG_TAG, "start: pool ready (pool=" + poolSize
                 + ", " + screenWidth + "x" + screenHeight

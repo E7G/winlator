@@ -642,7 +642,13 @@ void wine_ahb_destroy_swapchain(struct wine_vk_swapchain *swapchain)
 
     VkDevice device = swapchain->device;
 
-    for (uint32_t i = 0; i < swapchain->image_count; i++)
+    /* Iterate ALL AHB_MAX_IMAGES slots (not just image_count). The layer may
+     * cap swapchain->image_count below the originally-imported count when
+     * the real trojan swapchain has fewer images than the AHB pool — slots
+     * [image_count..AHB_MAX_IMAGES-1] still hold valid VkImage/VkMemory
+     * resources that must be freed. NULL checks below make this safe for
+     * un-imported slots. */
+    for (uint32_t i = 0; i < AHB_MAX_IMAGES; i++)
     {
         /* Wait for any pending reuse fence before destroying */
         if (swapchain->images[i].reuse_fence != VK_NULL_HANDLE)

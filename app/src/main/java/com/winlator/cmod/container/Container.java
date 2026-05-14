@@ -30,6 +30,26 @@ public class Container {
     public static final String DEFAULT_SCREEN_SIZE = "1280x720";
     public static final String DEFAULT_GRAPHICS_DRIVER = "wrapper";
     public static final String DEFAULT_AUDIO_DRIVER = "alsa";
+
+    /* Graphics Pipeline selector — see VulkanRendererContext + ahb_layer.c.
+     * "quality": direct-AHB swapchain, zero-copy from DXVK to SurfaceFlinger
+     *            overlay, phase-anchored vsync pacing. Eliminates jitter at
+     *            the cost of ~5-10 FPS in heavy games (AHB-as-render-target
+     *            is slower on Adreno than a device-local image).
+     * "performance": legacy trojan-blit pipeline. DXVK renders into a
+     *            device-local trojan image, the layer blits it to the AHB.
+     *            Sustains 60 FPS more often but has visible motion jitter.
+     * Toggled by injecting WINLATOR_AHB_DIRECT_RENDER=1 or 0 in the launch env. */
+    public static final String DEFAULT_GRAPHICS_PIPELINE = "quality";
+    public static final String GRAPHICS_PIPELINE_QUALITY = "quality";
+    public static final String GRAPHICS_PIPELINE_PERFORMANCE = "performance";
+    /** Disable the DAC implicit Vulkan layer entirely. Game runs through the
+     *  original Ludashi X11/winex11 path with no AHardwareBuffer interception
+     *  (classic Wine → X → Android compositing). Use this for compatibility
+     *  when a game misbehaves with either DAC mode. Toggled by injecting
+     *  DISABLE_AHB_LAYER=1 in the launch env (handled by the Vulkan loader
+     *  via ahb_layer.json's disable_environment key). */
+    public static final String GRAPHICS_PIPELINE_NATIVE = "native";
     public static final String DEFAULT_EMULATOR = "FEXCore";
     public static final String DEFAULT_DXWRAPPER = "dxvk+vkd3d";
     public static final String DEFAULT_DXWRAPPERCONFIG = "version=" + DefaultVersion.DXVK + ",framerate=0,async=0,asyncCache=0" + ",vkd3dVersion=" + DefaultVersion.VKD3D + ",vkd3dLevel=12_1" + ",ddrawrapper=" + Container.DEFAULT_DDRAWRAPPER + ",csmt=3" + ",gpuName=NVIDIA GeForce GTX 480" + ",videoMemorySize=2048" + ",strict_shader_math=1" + ",OffscreenRenderingMode=fbo" + ",renderer=gl";
@@ -53,6 +73,7 @@ public class Container {
     private String dxwrapperConfig = "";
     private String wincomponents = DEFAULT_WINCOMPONENTS;
     private String audioDriver = DEFAULT_AUDIO_DRIVER;
+    private String graphicsPipeline = DEFAULT_GRAPHICS_PIPELINE;
     private String drives = DEFAULT_DRIVES;
     private String wineVersion = WineInfo.MAIN_WINE_VERSION.identifier();
     private boolean showFPS;
@@ -171,6 +192,16 @@ public class Container {
 
     public void setAudioDriver(String audioDriver) {
         this.audioDriver = audioDriver;
+    }
+
+    public String getGraphicsPipeline() {
+        return graphicsPipeline;
+    }
+
+    public void setGraphicsPipeline(String graphicsPipeline) {
+        this.graphicsPipeline = (graphicsPipeline != null && !graphicsPipeline.isEmpty())
+                ? graphicsPipeline
+                : DEFAULT_GRAPHICS_PIPELINE;
     }
 
     public String getWinComponents() {
@@ -430,6 +461,7 @@ public class Container {
             data.put("dxwrapper", dxwrapper);
             if (!dxwrapperConfig.isEmpty()) data.put("dxwrapperConfig", dxwrapperConfig);
             data.put("audioDriver", audioDriver);
+            data.put("graphicsPipeline", graphicsPipeline);
             data.put("wincomponents", wincomponents);
             data.put("drives", drives);
             data.put("showFPS", showFPS);
@@ -550,6 +582,9 @@ public class Container {
                     break;
                 case "audioDriver" :
                     setAudioDriver(data.getString(key));
+                    break;
+                case "graphicsPipeline" :
+                    setGraphicsPipeline(data.getString(key));
                     break;
                 case "desktopTheme" :
                     setDesktopTheme(data.getString(key));

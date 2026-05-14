@@ -174,8 +174,25 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     } else {
                         initComplete = true;
                         xServerView.queueEvent(this::updateScene);
-                        // Recreate SC layers if in nativeMode after successful reattach
-                        if (nativeMode) {
+                        // Recreate SC layers after successful reattach.
+                        //
+                        // Gate is "nativeMode OR DirectCompositor active": the
+                        // recv-thread DAC pipeline (used by direct-render mode)
+                        // bypasses VulkanRenderer.submitDirectFrame entirely
+                        // (it calls renderer->scanoutSetBuffer from C++), so
+                        // nativeMode stays false even when DAC frames are
+                        // flowing. Without this second condition, locking and
+                        // unlocking the device permanently freezes the game:
+                        // nativeReattachSurface calls destroyScanout(),
+                        // nulling scanoutGameSC; nothing then recreates it;
+                        // every subsequent scanoutSetBuffer hits the SKIPPED
+                        // path; SurfaceFlinger keeps showing the last frame
+                        // (or black) while DXVK keeps drawing into AHB pool
+                        // slots that never get displayed back.
+                        DirectCompositorComponent dccActive = directCompositorRef;
+                        boolean needScanoutRecreate = nativeMode
+                                || (dccActive != null && dccActive.isActive());
+                        if (needScanoutRecreate) {
                             xServerView.post(() -> {
                                 releaseScanoutSurfaces();
                                 if (android.os.Build.VERSION.SDK_INT >= 29) {
