@@ -30,6 +30,27 @@ This build mimics the package name of Genshin Impact. This is specifically desig
 1.  Download and install the latest APK from this repository's [Releases section](https://github.com/StevenMXZ/Winlator-Ludashi/releases) (choose your preferred build: `dev-vanilla`, `ludashi`, or `redmagic`).
 2.  Launch the app and wait for the installation process to finish.
 
+# Graphics Pipeline (Direct Android Compositing)
+
+This fork adds **Direct Android Compositing (DAC)** — a zero-copy Vulkan
+present path that routes `DXVK → AHardwareBuffer → SurfaceControl → SurfaceFlinger`
+instead of going through Wine's X11 server. The result is lower latency
+and smoother motion for Vulkan-rendered games.
+
+A **Graphics Pipeline** dropdown is available in both Container Settings
+and per-shortcut Settings (Shortcuts → ⋮ → Settings → Graphics Pipeline)
+with three options:
+
+| Option | What it does | When to pick it |
+|---|---|---|
+| **Quality (Direct-Render)** *(default)* | DXVK renders directly into AHardwareBuffers, no intermediate copy. SurfaceFlinger composites via hardware overlay. | Default for all Vulkan games. Lowest latency, smoothest motion. |
+| **Performance (Trojan-Blit)** | DXVK renders into a regular device-local image; layer blits it to the AHB before display. | Compatibility fallback if Quality has artifacts on a specific game; sometimes yields slightly higher steady FPS on shader-heavy titles. |
+| **Native (X11)** | DAC layer is disabled entirely (`DISABLE_AHB_LAYER=1`). Game runs through the original Wine-X11 path. | Use for games that misbehave under DAC, or to compare against upstream Winlator behavior. |
+
+The shortcut-level setting wins over the container-level setting when set,
+so you can keep most games on Quality and switch individual problem
+titles to Performance or Native without changing the container default.
+
 # Useful Tips
 
   - Here is a tutorial from ZeroKimchi channel on how to use Winlator Bionic:
@@ -40,6 +61,7 @@ This build mimics the package name of Genshin Impact. This is specifically desig
   - If some older games don't open, try adding the environment variable MESA\_EXTENSION\_MAX\_YEAR=2003 in Container Settings -\> Environment Variables.
   - Try running the games using the shortcut on the Winlator home screen, there you can define individual settings for each game.
   - To speed up the installers, try changing the Box86/Box64 preset to Intermediate in Container Settings -\> Advanced Tab.
+  - If a Vulkan game freezes or crashes, try switching the **Graphics Pipeline** option (Quality → Performance → Native) in the shortcut settings before assuming Wine/Proton compatibility is the problem.
 
 # Additional Components & Updates
 

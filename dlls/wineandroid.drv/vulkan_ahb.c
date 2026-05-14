@@ -348,12 +348,17 @@ VkResult import_ahb_to_vk_image(struct wine_vk_swapchain *swapchain,
                                        uint32_t slot_index,
                                        AHardwareBuffer *ahb,
                                        VkPhysicalDevice phys_device,
-                                       PFN_vkGetPhysicalDeviceMemoryProperties get_mem_props)
+                                       PFN_vkGetPhysicalDeviceMemoryProperties get_mem_props,
+                                       VkFormat vk_format)
 {
     VkDevice device = swapchain->device;
     int width = swapchain->surface->width;
     int height = swapchain->surface->height;
     VkResult res;
+
+    /* Default: legacy trojan-blit path used R8G8B8A8 because the format-aware
+     * blit from a B8G8R8A8 trojan handled the byte swap. */
+    if (vk_format == 0) vk_format = VK_FORMAT_R8G8B8A8_UNORM;
 
     /* Create the VkImage with external memory info */
     VkExternalMemoryImageCreateInfo ext_mem_info = {
@@ -367,10 +372,7 @@ VkResult import_ahb_to_vk_image(struct wine_vk_swapchain *swapchain,
         .pNext = &ext_mem_info,
         .flags = 0,
         .imageType = VK_IMAGE_TYPE_2D,
-        .format = VK_FORMAT_R8G8B8A8_UNORM,  /* AHB native format is RGBA8888 (HAL_PIXEL_FORMAT_RGBA_8888=1).
-                                              * Importing as R8G8B8A8 matches the byte layout SurfaceFlinger reads.
-                                              * The blit from DXVK's B8G8R8A8 trojan uses vkCmdBlitImage (NOT CopyImage),
-                                              * which does format-aware channel reinterpretation: BGRA→RGBA. */
+        .format = vk_format,
         .extent = { (uint32_t)width, (uint32_t)height, 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
@@ -589,7 +591,9 @@ VkResult wine_ahb_create_swapchain(VkDevice device, VkPhysicalDevice phys_device
         }
 
         /* Import the AHB into Vulkan */
-        res = import_ahb_to_vk_image(swapchain, i, ahb, phys_device, get_mem_props);
+        /* Default format (0 -> R8G8B8A8): legacy wine_ahb_create_swapchain path
+         * doesn't have a layer above it to choose a different format. */
+        res = import_ahb_to_vk_image(swapchain, i, ahb, phys_device, get_mem_props, 0);
         if (res != VK_SUCCESS)
         {
             AHardwareBuffer_release(ahb);
@@ -638,7 +642,13 @@ void wine_ahb_destroy_swapchain(struct wine_vk_swapchain *swapchain)
 
     VkDevice device = swapchain->device;
 
-    for (uint32_t i = 0; i < swapchain->image_count; i++)
+    /* Iterate ALL AHB_MAX_IMAGES slots (not just image_count). The layer may
+     * cap swapchain->image_count below the originally-imported count when
+     * the real trojan swapchain has fewer images than the AHB pool — slots
+     * [image_count..AHB_MAX_IMAGES-1] still hold valid VkImage/VkMemory
+     * resources that must be freed. NULL checks below make this safe for
+     * un-imported slots. */
+    for (uint32_t i = 0; i < AHB_MAX_IMAGES; i++)
     {
         /* Wait for any pending reuse fence before destroying */
         if (swapchain->images[i].reuse_fence != VK_NULL_HANDLE)
@@ -757,7 +767,8 @@ VkResult wine_ahb_acquire_next_image(struct wine_vk_swapchain *swapchain,
  */
 VkResult wine_ahb_queue_present(struct wine_vk_swapchain *swapchain,
                                 VkQueue queue, uint32_t image_index,
-                                VkFence render_fence, uint64_t present_id)
+                                VkFence render_fence, uint64_t present_id,
+                                uint8_t bgra_bytes)
 {
     if (!swapchain || image_index >= swapchain->image_count)
         return VK_ERROR_INITIALIZATION_FAILED;
@@ -795,6 +806,7 @@ VkResult wine_ahb_queue_present(struct wine_vk_swapchain *swapchain,
         .dst_w = surface->width,
         .dst_h = surface->height,
         .present_id = present_id,
+        .bgra_bytes = bgra_bytes,
     };
 
     int send_result;

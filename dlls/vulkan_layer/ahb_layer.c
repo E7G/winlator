@@ -104,6 +104,24 @@ static VkCommandBuffer           g_copy_cmd_bufs[AHB_MAX_IMAGES] = {VK_NULL_HAND
 static VkFence                   g_copy_fences[AHB_MAX_IMAGES] = {VK_NULL_HANDLE};
 static VkQueue                   g_saved_queue = VK_NULL_HANDLE;
 
+/* === DIRECT-RENDER MODE (Path 3) ===
+ *
+ * When enabled (env var WINLATOR_AHB_DIRECT_RENDER=1), DXVK renders DIRECTLY
+ * into the AHB-backed VkImages. The trojan swapchain + per-slot blit are
+ * skipped entirely. QueuePresentKHR submits a "fence-only signal" job (zero
+ * commands; waits on DXVK's render-complete semaphores, signals the per-slot
+ * fence) so we still get a SYNC_FD to ship to SurfaceFlinger as the acquire
+ * fence.
+ *
+ * Saved per frame: vkCmdBlitImage + 4 image-memory barriers + one
+ * BeginCommandBuffer/EndCommandBuffer + the trojan image allocation. The
+ * AHB write happens during DXVK's own draws (zero-copy from there to
+ * SurfaceFlinger).
+ *
+ * Defaults OFF — the trojan-blit path is the safe known-good. Toggle on
+ * after verifying. Set once at layer init by reading the env var. */
+static bool g_direct_render_mode = false;
+
 /* Per-slot mailbox state — true when the slot is available for DXVK to render.
  * Slots transition free→busy on acquire and busy→free on MSG_RELEASE recv. */
 static bool g_slot_free[AHB_MAX_IMAGES] = { true, true, true, true };
@@ -159,10 +177,142 @@ static uint64_t g_max_completed_present_id = 0;
  * real vsync. */
 static uint64_t g_display_count = 0;
 
+/* === PHASE-ANCHORED VSYNC TIMESTAMP ===
+ * Updated on every MSG_VSYNC from the Android receiver — i.e. once per
+ * AChoreographer callback, i.e. once per real panel vsync independent of
+ * our present cadence. WFP uses this as a PHASE REFERENCE for
+ * clock_nanosleep TIMER_ABSTIME: the wake target is computed as
+ *   target = g_last_hardware_vsync_us + N * 16667us  (smallest N s.t. > now)
+ * and the kernel sleeps until that absolute monotonic time. This decouples:
+ *   - the IPC delivery path (which has thread-hop variance) from
+ *   - the actual wake (which is kernel-scheduler precise).
+ * The IPC just keeps the clock synchronized; nanosleep does the wake.
+ *
+ * The counter (g_vsync_count) is kept for diagnostics — it's never used
+ * to gate WFP because cond-var-on-MSG_VSYNC adds the same multi-hop
+ * variance that we are trying to escape.
+ *
+ * Both fields read/written under g_release_mtx (cheap; uncontended). */
+static uint64_t g_vsync_count = 0;
+static uint64_t g_last_hardware_vsync_us = 0;
+
 static pthread_mutex_t g_release_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  g_release_cv  = PTHREAD_COND_INITIALIZER;
 static pthread_t g_release_thread;
 static bool g_release_thread_running = false;
+
+/* === FRAME PACING (Pillar 2 — Swappy-style predictor) ===
+ *
+ * Problem: DXVK render time is bimodal — most frames finish in time for the
+ * next vsync, some don't. Without pacing, the user sees motion alternating
+ * between 60 FPS smooth and 30 FPS chop.
+ *
+ * Solution: track recent render times in a rolling window. On each
+ * vkWaitForPresentKHR, predict the next render time (p90 — robust to
+ * outliers), divide by the self-discovered vsync period, and wait that
+ * many MSG_TICK events before returning. Result: every frame interval is
+ * exactly a multiple of vsync. No bimodality.
+ *
+ * Hysteresis: only allow stepping DOWN to a lower interval count if the
+ * predicted render time is comfortably below the lower bucket (85% of
+ * one bucket). Prevents single-frame oscillation. All state guarded by
+ * g_release_mtx so reads in WaitForPresent are consistent. */
+#define FP_WINDOW 16
+/* Skip the first N samples — startup is dominated by shader compile / asset
+ * load hitches that don't represent steady-state render time and poison
+ * any percentile prediction. */
+#define FP_WARMUP_FRAMES 5
+
+/* Rolling window of CPU render times (acquire → present, microseconds). */
+static uint64_t g_fp_render_times[FP_WINDOW] = {0};
+static uint32_t g_fp_render_head  = 0;
+static uint32_t g_fp_render_count = 0;
+/* Counts samples we've SEEN (including warmup-skipped ones) so we can skip
+ * the first N without affecting the recorded window. */
+static uint32_t g_fp_render_seen  = 0;
+/* Set in acquire; consumed (and reset to 0) in present. */
+static uint64_t g_fp_last_acquire_us = 0;
+
+/* Rolling window of MSG_TICK inter-arrival deltas → self-discovered vsync
+ * period. Defaults to 60 Hz (16.67 ms) until we have enough samples. */
+static uint64_t g_fp_tick_deltas[FP_WINDOW] = {0};
+static uint32_t g_fp_tick_head    = 0;
+static uint32_t g_fp_tick_count   = 0;
+static uint64_t g_fp_last_tick_for_period_us = 0;
+static uint64_t g_fp_vsync_period_us = 16667;
+
+/* For time-based pacing (separate from tick-based natural pacing) */
+static uint64_t g_fp_last_wait_return_us = 0;
+
+/* Helpers — small enough for bubble sort to dominate cache lines.
+ *
+ * Note on choice of statistic: Swappy uses p90 (pessimistic). That's
+ * theoretically right because UNDER-estimating render time causes vsync
+ * misses, which manifest as jitter. The catch in our setting is that
+ * startup hitches (shader compile, asset load) poison the window with
+ * 50–200ms samples that take >FP_WINDOW frames to age out. p90 captures
+ * exactly those poisoning values and locks us into clamp-4 pacing.
+ *
+ * We use p50 (median) instead — robust to single-sample outliers — and
+ * combine it with a small upward bias (15%) for safety margin. With the
+ * warmup-skip + outlier rejection at record time, the window contains
+ * only steady-state render times. Median over that is the right answer. */
+static uint64_t fp_percentile_render_locked(uint32_t pct) {
+    (void)pct;  /* kept in signature for API stability — we now always use p50 */
+    uint32_t n = g_fp_render_count < FP_WINDOW ? g_fp_render_count : FP_WINDOW;
+    if (n < 4) return 16667;  /* insufficient data: assume 60 Hz */
+    uint64_t copy[FP_WINDOW];
+    for (uint32_t i = 0; i < n; i++) copy[i] = g_fp_render_times[i];
+    for (uint32_t i = 0; i + 1 < n; i++) {
+        for (uint32_t j = i + 1; j < n; j++) {
+            if (copy[i] > copy[j]) { uint64_t t = copy[i]; copy[i] = copy[j]; copy[j] = t; }
+        }
+    }
+    /* p50 with 15% upward bias for safety margin. */
+    uint64_t median = copy[n / 2];
+    return (median * 115) / 100;
+}
+static uint64_t fp_median_tick_locked(void) {
+    uint32_t n = g_fp_tick_count < FP_WINDOW ? g_fp_tick_count : FP_WINDOW;
+    if (n < 4) return 16667;
+    uint64_t copy[FP_WINDOW];
+    for (uint32_t i = 0; i < n; i++) copy[i] = g_fp_tick_deltas[i];
+    for (uint32_t i = 0; i + 1 < n; i++) {
+        for (uint32_t j = i + 1; j < n; j++) {
+            if (copy[i] > copy[j]) { uint64_t t = copy[i]; copy[i] = copy[j]; copy[j] = t; }
+        }
+    }
+    return copy[n / 2];
+}
+
+/* === JITTER TRACE ===
+ * Per-stage inter-event delta logging. Each tracer keeps a previous-timestamp
+ * and logs the delta in microseconds when an event fires. Use:
+ *     adb logcat -d | grep JITTER_TRACE > trace.txt
+ * Then awk or load into a spreadsheet to compare variance across stages.
+ *
+ * Stages on the layer side:
+ *   stage=present     — DXVK called vkQueuePresentKHR (one per game frame)
+ *   stage=wait_return — vkWaitForPresentKHR unblocked
+ *   stage=wait_block  — vkWaitForPresentKHR was called; reports how long
+ *                       it blocked before returning (separately from delta)
+ *   stage=tick        — release-reader thread observed MSG_TICK
+ * The Android side adds: recv, apply, onCommit. */
+static inline uint64_t mono_us(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)ts.tv_nsec / 1000ULL;
+}
+#define JTRACE(stage_str, prev_var_ptr, fmt, ...) do {                       \
+    uint64_t _now = mono_us();                                               \
+    uint64_t _prev = *(prev_var_ptr);                                        \
+    *(prev_var_ptr) = _now;                                                  \
+    if (_prev) {                                                             \
+        uint64_t _d = _now - _prev;                                          \
+        LOGI("JITTER_TRACE: stage=%s delta_us=%llu " fmt,                    \
+             (stage_str), (unsigned long long)_d, ##__VA_ARGS__);            \
+    }                                                                        \
+} while (0)
 
 /* ========================================================================
  * Layer chaining helper
@@ -219,15 +369,71 @@ static void *release_reader_thread(void *arg) {
             LOGW("release_reader_thread: recv ended (n=%zd: %s); exiting", n, strerror(errno));
             break;
         }
-        if (n != (ssize_t)sizeof(rel) || rel.type != MSG_RELEASE) continue;
+        if (n != (ssize_t)sizeof(rel)) continue;
+
+        /* MSG_VSYNC: from Android-side AChoreographer_postFrameCallback,
+         * sent once per real panel vsync independent of our present cadence.
+         * Stamps g_last_hardware_vsync_us so WFP's clock_nanosleep TIMER_ABSTIME
+         * has a phase reference.
+         *
+         * Anchor choice: we use recv-time (mono_us() at the moment we process
+         * the message). The IPC adds ~500 µs of mostly-stable latency, and
+         * EMPIRICALLY that gives the smoothest pacing on the Odin 2 Portal —
+         * waking exactly at the panel vsync (via the shipped frameTimeNanos)
+         * landed our subsequent ASurfaceTransaction apply too close to
+         * SurfaceFlinger's swap deadline, causing some frames to slip a
+         * vsync. The IPC delay was an accidental but useful headroom. The
+         * MSG_VSYNC payload still ships vsync_time_ns for future use but
+         * we don't read it for pacing. */
+        if (rel.type == MSG_VSYNC) {
+            uint64_t recv_us = mono_us();
+            pthread_mutex_lock(&g_release_mtx);
+            g_vsync_count++;
+            g_last_hardware_vsync_us = recv_us;
+            pthread_mutex_unlock(&g_release_mtx);
+            static uint64_t s_vsync_prev = 0;
+            JTRACE("vsync", &s_vsync_prev, "count=%llu",
+                   (unsigned long long)g_vsync_count);
+            continue;
+        }
+
+        /* MSG_TICK: from Android-side setOnCommit, sent once per real vsync.
+         * Drives g_display_count (the pacing signal for vkWaitForPresentKHR).
+         * Slot-freeing happens separately via MSG_RELEASE. */
+        if (rel.type == MSG_TICK) {
+            static uint64_t s_tick_prev = 0;
+            JTRACE("tick", &s_tick_prev, "count=%llu",
+                   (unsigned long long)(g_display_count + 1));
+            uint64_t now = mono_us();
+            pthread_mutex_lock(&g_release_mtx);
+            /* Track inter-tick interval for self-discovered vsync period.
+             * Filter outliers (<2ms or >50ms) to keep the median stable. */
+            if (g_fp_last_tick_for_period_us != 0) {
+                uint64_t d = now - g_fp_last_tick_for_period_us;
+                if (d >= 2000 && d <= 50000) {
+                    g_fp_tick_deltas[g_fp_tick_head] = d;
+                    g_fp_tick_head = (g_fp_tick_head + 1) % FP_WINDOW;
+                    if (g_fp_tick_count < FP_WINDOW) g_fp_tick_count++;
+                    g_fp_vsync_period_us = fp_median_tick_locked();
+                }
+            }
+            g_fp_last_tick_for_period_us = now;
+            g_display_count++;
+            pthread_cond_broadcast(&g_release_cv);
+            pthread_mutex_unlock(&g_release_mtx);
+            continue;
+        }
+
+        if (rel.type != MSG_RELEASE) continue;
         if (rel.slot_index >= AHB_MAX_IMAGES) continue;
 
         pthread_mutex_lock(&g_release_mtx);
         g_slot_free[rel.slot_index] = true;
 
-        /* If this release came from an onComplete (frame actually displayed),
-         * advance the vsync-paced display counter. Mailbox-drain releases
-         * (displayed=0) only free the slot. */
+        /* Fallback path: if Android-side has no setOnCommit (Android < 12),
+         * onComplete-driven MSG_RELEASE arrives with displayed=1 to act as
+         * the tick. With setOnCommit available, MSG_RELEASE always uses
+         * displayed=0 (slot freeing only) so we don't double-count. */
         if (rel.displayed) {
             g_display_count++;
         }
@@ -340,16 +546,19 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_GetPhysicalDeviceSurfaceFormatsKHR(
         return g_inst_dispatch.GetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, pSurfaceFormatCount, pSurfaceFormats);
     }
 
-    /* Report both RGBA8 and BGRA8 to satisfy DXVK which prefers BGRA8.
-     * AHB format AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM maps to VK_FORMAT_R8G8B8A8_UNORM
-     * but the Vulkan driver also accepts B8G8R8A8 for AHB import on most devices. */
+    /* Advertise BGRA first in both modes. DXVK's preferred swapchain
+     * format is B8G8R8A8_UNORM (matches DXGI_FORMAT_B8G8R8A8_UNORM, the
+     * standard DirectX swapchain format) and DXVK's own caching often
+     * bypasses our format restriction anyway. By aligning the AHB pool's
+     * HAL format to BGRA (P2 change), DXVK's preferred format also
+     * matches the AHB byte layout — no channel swap needed end-to-end. */
     static const VkSurfaceFormatKHR formats[] = {
         { VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
         { VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
         { VK_FORMAT_B8G8R8A8_SRGB,  VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
         { VK_FORMAT_R8G8B8A8_SRGB,  VK_COLOR_SPACE_SRGB_NONLINEAR_KHR },
     };
-    uint32_t count = sizeof(formats) / sizeof(formats[0]);
+    uint32_t count = (uint32_t)(sizeof(formats) / sizeof(formats[0]));
 
     if (!pSurfaceFormats) {
         *pSurfaceFormatCount = count;
@@ -506,10 +715,23 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
         sc->images[i].in_use = false;
     }
 
-    /* Import AHBs */
+    /* Import the AHB into Vulkan as B8G8R8A8_UNORM — matches the pool's
+     * HAL_PIXEL_FORMAT_BGRA_8888 backing (see AHardwareBufferPool.java).
+     *
+     * Both modes use the same import format:
+     *   - Direct-render: DXVK writes BGRA bytes directly into the AHB.
+     *     Memory bytes are BGRA, SurfaceFlinger reads HAL_BGRA → correct.
+     *   - Trojan-blit fallback: DXVK writes BGRA into the trojan (also
+     *     B8G8R8A8), then vkCmdBlitImage copies trojan → AHB. With both
+     *     ends labeled the same format, the blit degenerates to a byte
+     *     copy (no channel reinterpretation). AHB memory stays BGRA.
+     *
+     * The AHB's HAL format and the Vulkan import format MUST agree — if
+     * they disagree (e.g. HAL=BGRA + import=RGBA), pixels are read at
+     * wrong byte offsets, swapping R and B on display. */
     PFN_vkGetPhysicalDeviceMemoryProperties getMemProps = g_inst_dispatch.GetPhysicalDeviceMemoryProperties;
     for (uint32_t i = 0; i < sc->image_count; i++) {
-        VkResult ires = import_ahb_to_vk_image(sc, i, g_ahb_buffers[i], g_phys_device, getMemProps);
+        VkResult ires = import_ahb_to_vk_image(sc, i, g_ahb_buffers[i], g_phys_device, getMemProps, VK_FORMAT_B8G8R8A8_UNORM);
         if (ires != VK_SUCCESS) {
             LOGE("layer_CreateSwapchainKHR: import failed slot %u: %d", i, ires);
             for (uint32_t j = 0; j < i; j++) {
@@ -527,98 +749,174 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
 
     g_ahb_swapchain = sc;
 
-    /* === TROJAN HORSE: create a REAL swapchain for handle validity ===
-     *
-     * Pass DXVK's requested present mode through to the real swapchain UNCHANGED.
-     *
-     * Previously we forced MAILBOX here, on the theory that the trojan needed
-     * to "never block on acquire." But we never call vkAcquireNextImageKHR on
-     * the trojan — we have our own slot-picking logic — so the trojan's mode
-     * never affects our pacing. The override only caused DXVK's internal state
-     * (which believes the swapchain is FIFO when DXVK requested FIFO) to diverge
-     * from the real driver state (which thinks the swapchain is MAILBOX).
-     *
-     * That divergence appears to be why FIFO games (Vampire Survivors, Hollow
-     * Knight, GTA4) freeze at frame 3 — DXVK's render commands or fence-wait
-     * logic interrogates the real swapchain in some way that fails because
-     * MAILBOX semantics differ from the FIFO behavior DXVK expects. */
-    VkResult real_res = g_dev_dispatch.CreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
-    LOGI("layer_CreateSwapchainKHR: trojan created with DXVK's requested mode=%d, result=%d",
-         (int)pCreateInfo->presentMode, real_res);
-    if (real_res != VK_SUCCESS) {
-        LOGE("layer_CreateSwapchainKHR: real swapchain creation failed (%d), using AHB-only", real_res);
-        /* Fallback: return fake handle (may still fail with Wine thunks) */
+    if (g_direct_render_mode) {
+        /* === DIRECT-RENDER MODE (Path 3) ===
+         *
+         * No trojan swapchain. The AHB-backed VkImages are exposed to DXVK
+         * directly via vkGetSwapchainImagesKHR; DXVK renders straight into
+         * them. We still need per-slot fences (export-capable for SYNC_FD)
+         * because QueuePresentKHR submits a fence-only signal to convert
+         * DXVK's render-complete semaphores into a SYNC_FD for SurfaceFlinger.
+         *
+         * The "real" swapchain handle is the synthetic pointer to our
+         * wine_vk_swapchain struct — downstream code compares against
+         * g_real_swapchain_handle so any swapchain handle works as long as
+         * it's unique. */
         *pSwapchain = (VkSwapchainKHR)(uintptr_t)sc;
-    } else {
         g_real_swapchain_handle = *pSwapchain;
-        LOGI("layer_CreateSwapchainKHR: real swapchain handle=%p stored as trojan",
-             (void*)(uintptr_t)*pSwapchain);
+        g_trojan_image_count = 0;  /* signals "no trojan blit infrastructure" */
 
-        /* Get trojan swapchain images — these are regular device-local images
-         * (no AHB backing) that DXVK will render into safely. */
-        g_trojan_image_count = AHB_MAX_IMAGES;
-        VkResult img_res = g_dev_dispatch.GetSwapchainImagesKHR(
-            device, g_real_swapchain_handle, &g_trojan_image_count, g_trojan_images);
-        if (img_res != VK_SUCCESS && img_res != VK_INCOMPLETE) {
-            LOGE("layer_CreateSwapchainKHR: failed to get trojan images (%d)", img_res);
-            g_trojan_image_count = 0;
-        } else {
-            LOGI("layer_CreateSwapchainKHR: got %u trojan images for blit indirection",
-                 g_trojan_image_count);
+        /* Create per-slot export-capable fences. Same layout as the trojan
+         * path's g_copy_fences but no command-buffer/pool overhead. */
+        VkExportFenceCreateInfo export_ci = {
+            .sType = VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO,
+            .pNext = NULL,
+            .handleTypes = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT,
+        };
+        VkFenceCreateInfo fence_ci = {
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .pNext = &export_ci,
+            .flags = 0,
+        };
+        int created = 0;
+        for (uint32_t i = 0; i < sc->image_count; i++) {
+            VkResult fres = g_dev_dispatch.CreateFence(device, &fence_ci, NULL, &g_copy_fences[i]);
+            if (fres != VK_SUCCESS) {
+                LOGW("layer_CreateSwapchainKHR: direct-render fence %u failed (%d), retrying plain", i, fres);
+                VkFenceCreateInfo plain_ci = {
+                    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                    .flags = 0,
+                };
+                g_dev_dispatch.CreateFence(device, &plain_ci, NULL, &g_copy_fences[i]);
+            } else {
+                created++;
+            }
         }
+        LOGI("layer_CreateSwapchainKHR: DIRECT-RENDER mode — synthetic swapchain handle=%p, %u/%u export fences",
+             (void*)(uintptr_t)*pSwapchain, created, sc->image_count);
+    } else {
+        /* === TROJAN HORSE: create a REAL swapchain for handle validity ===
+         *
+         * Pass DXVK's requested present mode through to the real swapchain UNCHANGED.
+         *
+         * Previously we forced MAILBOX here, on the theory that the trojan needed
+         * to "never block on acquire." But we never call vkAcquireNextImageKHR on
+         * the trojan — we have our own slot-picking logic — so the trojan's mode
+         * never affects our pacing. The override only caused DXVK's internal state
+         * (which believes the swapchain is FIFO when DXVK requested FIFO) to diverge
+         * from the real driver state (which thinks the swapchain is MAILBOX).
+         *
+         * That divergence appears to be why FIFO games (Vampire Survivors, Hollow
+         * Knight, GTA4) freeze at frame 3 — DXVK's render commands or fence-wait
+         * logic interrogates the real swapchain in some way that fails because
+         * MAILBOX semantics differ from the FIFO behavior DXVK expects. */
+        VkResult real_res = g_dev_dispatch.CreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
+        LOGI("layer_CreateSwapchainKHR: trojan created with DXVK's requested mode=%d, result=%d",
+             (int)pCreateInfo->presentMode, real_res);
+        if (real_res != VK_SUCCESS) {
+            LOGE("layer_CreateSwapchainKHR: real swapchain creation failed (%d), using AHB-only", real_res);
+            /* Fallback: return fake handle (may still fail with Wine thunks) */
+            *pSwapchain = (VkSwapchainKHR)(uintptr_t)sc;
+        } else {
+            g_real_swapchain_handle = *pSwapchain;
+            LOGI("layer_CreateSwapchainKHR: real swapchain handle=%p stored as trojan",
+                 (void*)(uintptr_t)*pSwapchain);
 
-        /* Create command pool + per-slot command buffers + per-slot fences for blit.
-         * Per-slot resources eliminate the cross-frame fence reuse that was causing
-         * Adreno driver timeouts. Each ahb_slot owns its own (cmd_buf, fence) pair. */
-        if (g_trojan_image_count > 0 && !g_copy_cmd_pool) {
-            VkCommandPoolCreateInfo pool_ci = {
-                .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-                .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-                .queueFamilyIndex = 0, /* graphics queue family */
-            };
-            g_dev_dispatch.CreateCommandPool(device, &pool_ci, NULL, &g_copy_cmd_pool);
-
-            VkCommandBufferAllocateInfo alloc_ci = {
-                .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                .commandPool = g_copy_cmd_pool,
-                .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                .commandBufferCount = g_trojan_image_count,
-            };
-            g_dev_dispatch.AllocateCommandBuffers(device, &alloc_ci, g_copy_cmd_bufs);
-
-            /* Create fences with SYNC_FD export capability so wine_ahb_queue_present
-             * can call vkGetFenceFdKHR(SYNC_FD_BIT) on them. */
-            VkExportFenceCreateInfo export_ci = {
-                .sType = VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO,
-                .pNext = NULL,
-                .handleTypes = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT,
-            };
-            VkFenceCreateInfo fence_ci = {
-                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-                .pNext = &export_ci,
-                /* Not signaled: vkGetFenceFdKHR(SYNC_FD) requires the fence to
-                 * have a pending signal operation OR be unsignaled. Initial
-                 * signaled state would force a wait+reset on first use. */
-                .flags = 0,
-            };
-            int created = 0;
-            for (uint32_t i = 0; i < g_trojan_image_count; i++) {
-                VkResult fres = g_dev_dispatch.CreateFence(device, &fence_ci, NULL, &g_copy_fences[i]);
-                if (fres != VK_SUCCESS) {
-                    LOGW("layer_CreateSwapchainKHR: exportable fence %u failed (%d), retrying plain", i, fres);
-                    VkFenceCreateInfo plain_ci = {
-                        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-                        .flags = 0,
-                    };
-                    g_dev_dispatch.CreateFence(device, &plain_ci, NULL, &g_copy_fences[i]);
-                } else {
-                    created++;
+            /* Get trojan swapchain images — these are regular device-local images
+             * (no AHB backing) that DXVK will render into safely. */
+            g_trojan_image_count = AHB_MAX_IMAGES;
+            VkResult img_res = g_dev_dispatch.GetSwapchainImagesKHR(
+                device, g_real_swapchain_handle, &g_trojan_image_count, g_trojan_images);
+            if (img_res != VK_SUCCESS && img_res != VK_INCOMPLETE) {
+                LOGE("layer_CreateSwapchainKHR: failed to get trojan images (%d)", img_res);
+                g_trojan_image_count = 0;
+            } else {
+                LOGI("layer_CreateSwapchainKHR: got %u trojan images for blit indirection",
+                     g_trojan_image_count);
+                /* === FIX: cap AHB swapchain image_count to trojan count ===
+                 *
+                 * The AHB pool has up to AHB_MAX_IMAGES slots, but the real
+                 * driver may return fewer trojan images — FIFO swapchains
+                 * commonly get 2-3, MAILBOX/IMMEDIATE 3-4. If sc->image_count
+                 * exceeds g_trojan_image_count, layer_AcquireNextImageKHR can
+                 * return ahb_slot ≥ g_trojan_image_count where the per-slot
+                 * cmd_buf/fence is VK_NULL_HANDLE. The QueuePresent blit
+                 * branch is skipped, falls through to the fallback that
+                 * forwards the AHB WITHOUT doing trojan→AHB copy → receiver
+                 * displays whatever stale bytes the AHB happened to hold,
+                 * game appears frozen on the first frame that lands in an
+                 * orphan slot.
+                 *
+                 * This is why FIFO games (Vampire Survivors with FIFO + 2-3
+                 * trojan images) freeze in trojan-blit mode while MAILBOX
+                 * games (Broforce) work — MAILBOX gets enough trojan images
+                 * to cover all 4 AHB slots.
+                 *
+                 * Cap image_count so acquire only ever returns a slot that
+                 * has a valid trojan/cmd_buf/fence triple. Unused AHB slots
+                 * remain imported (memory waste only) — destroy walks them
+                 * via the AHB_MAX_IMAGES-bounded loop in vulkan_ahb.c with
+                 * NULL checks already in place. */
+                if (g_trojan_image_count > 0 && sc->image_count > g_trojan_image_count) {
+                    LOGW("layer_CreateSwapchainKHR: capping image_count %u -> %u (trojan limit, FIFO-fix)",
+                         sc->image_count, g_trojan_image_count);
+                    sc->image_count = g_trojan_image_count;
                 }
             }
-            LOGI("layer_CreateSwapchainKHR: %u/%u exportable fences created",
-                 created, g_trojan_image_count);
-            LOGI("layer_CreateSwapchainKHR: per-slot blit resources created (pool=%p, %u cmd_bufs, %u fences)",
-                 (void*)g_copy_cmd_pool, g_trojan_image_count, g_trojan_image_count);
+
+            /* Create command pool + per-slot command buffers + per-slot fences for blit.
+             * Per-slot resources eliminate the cross-frame fence reuse that was causing
+             * Adreno driver timeouts. Each ahb_slot owns its own (cmd_buf, fence) pair. */
+            if (g_trojan_image_count > 0 && !g_copy_cmd_pool) {
+                VkCommandPoolCreateInfo pool_ci = {
+                    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                    .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+                    .queueFamilyIndex = 0, /* graphics queue family */
+                };
+                g_dev_dispatch.CreateCommandPool(device, &pool_ci, NULL, &g_copy_cmd_pool);
+
+                VkCommandBufferAllocateInfo alloc_ci = {
+                    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                    .commandPool = g_copy_cmd_pool,
+                    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                    .commandBufferCount = g_trojan_image_count,
+                };
+                g_dev_dispatch.AllocateCommandBuffers(device, &alloc_ci, g_copy_cmd_bufs);
+
+                /* Create fences with SYNC_FD export capability so wine_ahb_queue_present
+                 * can call vkGetFenceFdKHR(SYNC_FD_BIT) on them. */
+                VkExportFenceCreateInfo export_ci = {
+                    .sType = VK_STRUCTURE_TYPE_EXPORT_FENCE_CREATE_INFO,
+                    .pNext = NULL,
+                    .handleTypes = VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT,
+                };
+                VkFenceCreateInfo fence_ci = {
+                    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                    .pNext = &export_ci,
+                    /* Not signaled: vkGetFenceFdKHR(SYNC_FD) requires the fence to
+                     * have a pending signal operation OR be unsignaled. Initial
+                     * signaled state would force a wait+reset on first use. */
+                    .flags = 0,
+                };
+                int created = 0;
+                for (uint32_t i = 0; i < g_trojan_image_count; i++) {
+                    VkResult fres = g_dev_dispatch.CreateFence(device, &fence_ci, NULL, &g_copy_fences[i]);
+                    if (fres != VK_SUCCESS) {
+                        LOGW("layer_CreateSwapchainKHR: exportable fence %u failed (%d), retrying plain", i, fres);
+                        VkFenceCreateInfo plain_ci = {
+                            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                            .flags = 0,
+                        };
+                        g_dev_dispatch.CreateFence(device, &plain_ci, NULL, &g_copy_fences[i]);
+                    } else {
+                        created++;
+                    }
+                }
+                LOGI("layer_CreateSwapchainKHR: %u/%u exportable fences created",
+                     created, g_trojan_image_count);
+                LOGI("layer_CreateSwapchainKHR: per-slot blit resources created (pool=%p, %u cmd_bufs, %u fences)",
+                     (void*)g_copy_cmd_pool, g_trojan_image_count, g_trojan_image_count);
+            }
         }
     }
 
@@ -635,6 +933,23 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
     g_present_record_head = 0;
     g_max_completed_present_id = 0;
     g_display_count = 0;
+    /* Reset frame-pacing windows so a swapchain recreation starts learning
+     * fresh — the new swapchain may have different content / rate. */
+    for (uint32_t i = 0; i < FP_WINDOW; i++) {
+        g_fp_render_times[i] = 0;
+        g_fp_tick_deltas[i]  = 0;
+    }
+    g_fp_render_head  = g_fp_render_count = 0;
+    g_fp_render_seen  = 0;
+    g_fp_tick_head    = g_fp_tick_count   = 0;
+    g_fp_last_acquire_us         = 0;
+    g_fp_last_tick_for_period_us = 0;
+    g_fp_vsync_period_us         = 16667;
+    g_fp_last_wait_return_us     = 0;
+    /* Phase-anchor state: don't reset g_vsync_count itself (it's a monotonic
+     * absolute counter), but DO clear g_last_hardware_vsync_us so WFP's
+     * "is the Choreographer alive?" check starts from a known state. */
+    g_last_hardware_vsync_us     = 0;
     g_presented_ring[0] = g_presented_ring[1] = -1;
     g_presented_idx = 0;
     pthread_cond_broadcast(&g_release_cv);
@@ -645,9 +960,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
          (int)g_present_mode_requested, (int)VK_PRESENT_MODE_FIFO_KHR,
          (int)VK_PRESENT_MODE_MAILBOX_KHR, (int)VK_PRESENT_MODE_IMMEDIATE_KHR);
 
-    LOGI("layer_CreateSwapchainKHR: AHB SWAPCHAIN CREATED (%dx%d, %u images) — BLIT INDIRECTION %s",
+    LOGI("layer_CreateSwapchainKHR: AHB SWAPCHAIN CREATED (%dx%d, %u images) — mode=%s",
          pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height, sc->image_count,
-         g_trojan_image_count > 0 ? "ACTIVE" : "DISABLED");
+         g_direct_render_mode ? "DIRECT-RENDER"
+                              : (g_trojan_image_count > 0 ? "TROJAN-BLIT" : "TROJAN-FALLBACK"));
     return VK_SUCCESS;
 }
 
@@ -656,13 +972,32 @@ static VKAPI_ATTR void VKAPI_CALL layer_DestroySwapchainKHR(
     const VkAllocationCallbacks *pAllocator)
 {
     if (g_ahb_swapchain && g_real_swapchain_handle == swapchain) {
-        LOGI("layer_DestroySwapchainKHR: destroying AHB swapchain + real handle");
+        LOGI("layer_DestroySwapchainKHR: destroying AHB swapchain (mode=%s)",
+             g_direct_render_mode ? "direct-render" : "trojan-blit");
 
-        /* Drain any in-flight blits before tearing down per-slot resources.
+        /* Drain any in-flight submits before tearing down per-slot resources.
          * QueueWaitIdle is heavy but correct here — destruction is rare. */
         if (g_saved_queue && g_dev_dispatch.QueueWaitIdle)
             g_dev_dispatch.QueueWaitIdle(g_saved_queue);
 
+        if (g_direct_render_mode) {
+            /* Direct-render mode: only per-slot fences; no command pool, no
+             * trojan images, no real swapchain to destroy. */
+            for (uint32_t i = 0; i < AHB_MAX_IMAGES; i++) {
+                if (g_copy_fences[i] != VK_NULL_HANDLE) {
+                    g_dev_dispatch.DestroyFence(device, g_copy_fences[i], NULL);
+                    g_copy_fences[i] = VK_NULL_HANDLE;
+                }
+            }
+            wine_ahb_destroy_swapchain(g_ahb_swapchain);
+            g_ahb_swapchain = NULL;
+            g_real_swapchain_handle = VK_NULL_HANDLE;
+            /* Synthetic handle is just a pointer to the wine_vk_swapchain
+             * struct (just freed); nothing for the underlying driver to do. */
+            return;
+        }
+
+        /* Trojan-blit mode: tear down per-slot fences + command pool + real swapchain. */
         for (uint32_t i = 0; i < g_trojan_image_count; i++) {
             if (g_copy_fences[i] != VK_NULL_HANDLE) {
                 g_dev_dispatch.DestroyFence(device, g_copy_fences[i], NULL);
@@ -691,9 +1026,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_GetSwapchainImagesKHR(
     uint32_t *pCount, VkImage *pImages)
 {
     if (g_ahb_swapchain && g_real_swapchain_handle == swapchain) {
-        /* BLIT INDIRECTION: return trojan images (device-local, no AHB) so DXVK
-         * renders into them without gralloc lock conflicts. We copy to AHB in
-         * QueuePresentKHR. */
+        /* Direct-render mode: return AHB-backed VkImages directly. DXVK
+         * renders into them with no intermediate buffer. */
+        if (g_direct_render_mode) {
+            VkResult r = wine_ahb_get_swapchain_images(g_ahb_swapchain, pCount, pImages);
+            LOGI("layer_GetSwapchainImagesKHR: returning %u DIRECT-RENDER (AHB-backed) images, result=%d",
+                 pCount ? *pCount : 0, r);
+            return r;
+        }
+        /* Trojan-blit mode: return trojan images (device-local, no AHB) so
+         * DXVK renders into them without gralloc lock conflicts. We blit
+         * trojan → AHB in QueuePresentKHR. */
         if (g_trojan_image_count > 0) {
             if (!pImages) {
                 *pCount = g_trojan_image_count;
@@ -706,9 +1049,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_GetSwapchainImagesKHR(
             LOGI("layer_GetSwapchainImagesKHR: returning %u TROJAN images (blit indirection)", to_copy);
             return (to_copy < g_trojan_image_count) ? VK_INCOMPLETE : VK_SUCCESS;
         }
-        /* Fallback: return AHB images directly (no blit indirection) */
+        /* Fallback path: also return AHB images directly. */
         VkResult r = wine_ahb_get_swapchain_images(g_ahb_swapchain, pCount, pImages);
-        LOGI("layer_GetSwapchainImagesKHR: count=%u images=%p result=%d",
+        LOGI("layer_GetSwapchainImagesKHR: count=%u images=%p result=%d (fallback)",
              pCount ? *pCount : 0, (void*)pImages, r);
         return r;
     }
@@ -787,6 +1130,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_AcquireNextImageKHR(
         /* g_slot_free[ahb_idx] was already set false inside the locked section. */
         g_ahb_swapchain->current_image = (ahb_idx + 1) % image_count;
 
+        /* Frame pacing: stamp the moment DXVK starts working on this frame.
+         * Paired in QueuePresent to compute render time. */
+        pthread_mutex_lock(&g_release_mtx);
+        g_fp_last_acquire_us = mono_us();
+        pthread_mutex_unlock(&g_release_mtx);
+
         static int _acq_cnt = 0;
         ++_acq_cnt;
         /* Log every acquire for the first 30 frames so first-launch shader-compile
@@ -844,15 +1193,134 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_WaitForPresentKHR(
     uint64_t presentId, uint64_t timeout)
 {
     if (g_ahb_swapchain && g_real_swapchain_handle == swapchain) {
-        /* Return VK_SUCCESS immediately. Strict wait-on-onComplete pacing
-         * locks DXVK to 1-buffer-deep cycle, and SurfaceFlinger's onComplete
-         * lags apply by 1–2 vsyncs, capping framerate at half the panel rate
-         * (measured: 30 FPS on a 60 Hz mode). Proper fix is to use
-         * ASurfaceTransaction_setOnCommit (API 31+) for the vsync tick so
-         * Wine can pipeline frames, but that's a separate Android-side change.
-         * For now: instant-success keeps the working state. */
-        (void)presentId; (void)timeout;
-        return VK_SUCCESS;
+        /* === Pillar 2 — phase-anchored absolute sleep ===
+         *
+         * Each call wakes at the NEXT panel-vsync-aligned boundary, using:
+         *   - Phase reference: g_last_hardware_vsync_us, updated by the
+         *     release-reader thread on every MSG_VSYNC from the Android-side
+         *     AChoreographer callback. The IPC keeps the clock synchronized;
+         *     it does NOT gate the wait, so its delivery variance can't
+         *     affect wake precision.
+         *   - Wake mechanism: clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME),
+         *     a single syscall returning at the kernel scheduler's precision
+         *     with zero thread-hop variance.
+         *
+         * Design decisions:
+         *
+         *   1. NO render-time prediction. Earlier iterations used predicted
+         *      render time to scale intervals_needed (1×/2×/4× vsync). That
+         *      created the feedback loop: predicted climbed during startup
+         *      shader compiles, pacing slowed to 15 FPS, render times were
+         *      measured AGAINST the slowed pacing, predicted stayed high,
+         *      and recovery took ~40 seconds. We now ALWAYS target the next
+         *      vsync (or the one after, if we're already past it because
+         *      render ran long). Slow renders auto-pace via natural slot
+         *      back-pressure (Acquire blocks) and via missed-vsync drift.
+         *      No artificial cap, no recursive feedback.
+         *
+         *   2. Phase-anchored, not relative. target = g_last_hardware_vsync_us
+         *      + N × 16667 (smallest N s.t. target > now). Each call
+         *      recomputes the anchor fresh — drift can't accumulate.
+         *
+         *   3. Fallback to relative pacing when the vsync stream is silent
+         *      (very first present, scanout torn down). Same clock_nanosleep
+         *      primitive — just a different reference. */
+        uint64_t wait_entry_us = mono_us();
+
+        /* Prediction is kept for diagnostics only — does not influence pacing. */
+        pthread_mutex_lock(&g_release_mtx);
+        uint64_t predicted = fp_percentile_render_locked(50);  /* median + 15% bias */
+        uint64_t vsync_anchor = g_last_hardware_vsync_us;
+        uint64_t now_us = mono_us();
+        bool vsync_stream_live = (vsync_anchor != 0) &&
+                                 (now_us - vsync_anchor < 3 * 16667);
+        pthread_mutex_unlock(&g_release_mtx);
+
+        const uint64_t vsync_period_us = 16667;  /* 60 Hz panel; future: query */
+        VkResult result = VK_SUCCESS;
+
+        /* Compute absolute wake target. */
+        uint64_t target_us;
+        if (vsync_stream_live) {
+            /* Phase-anchored: target is the next panel-vsync boundary in the
+             * future, measured from the most recent hardware vsync we know
+             * about. The anchor is recv-time of MSG_VSYNC (NOT the shipped
+             * frameTimeNanos), which gives us implicit ~500 µs of SurfaceFlinger
+             * deadline margin — empirically the smoothest config on this SoC.
+             * See the MSG_VSYNC handler for rationale.
+             *
+             * The (target_us <= now_us) loop handles two cases:
+             *   - Normal: the next vsync is one period after the anchor.
+             *   - Catch-up: render took longer than one period, so we skip
+             *     ahead by additional periods until the target is genuinely
+             *     in the future. */
+            target_us = vsync_anchor + vsync_period_us;
+            while (target_us <= now_us) target_us += vsync_period_us;
+        } else if (g_fp_last_wait_return_us != 0) {
+            /* Fallback: relative pacing from the previous return. */
+            target_us = g_fp_last_wait_return_us + vsync_period_us;
+            if (target_us <= now_us) target_us = now_us;  /* don't drift backward */
+        } else {
+            /* Very first call. Return immediately so we don't stall on
+             * absent state; subsequent calls will be properly paced. */
+            target_us = now_us;
+        }
+
+        /* Honor caller's timeout. */
+        if (timeout == 0) {
+            /* DXVK occasionally polls with timeout=0; semantics is "return
+             * VK_TIMEOUT if not yet ready". With phase-anchored pacing we
+             * have nothing to "be ready for", so just return success. */
+        } else {
+            uint64_t deadline_us = (timeout == UINT64_MAX)
+                                   ? UINT64_MAX
+                                   : now_us + (timeout / 1000ULL);
+            if (target_us > deadline_us) {
+                target_us = deadline_us;
+                result = VK_TIMEOUT;
+            }
+        }
+
+        /* Absolute sleep. CLOCK_MONOTONIC matches mono_us(). */
+        if (target_us > now_us) {
+            struct timespec target_ts;
+            target_ts.tv_sec  = (time_t)(target_us / 1000000ULL);
+            target_ts.tv_nsec = (long)((target_us % 1000000ULL) * 1000ULL);
+            int rc;
+            while ((rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
+                                         &target_ts, NULL)) == EINTR) {
+                /* clock_nanosleep with ABSTIME re-uses the same target on
+                 * restart — no remainder tracking needed. */
+            }
+            (void)rc;  /* ignore other errors; we still mark return time */
+        }
+
+        uint64_t wait_return_us = mono_us();
+        g_fp_last_wait_return_us = wait_return_us;
+
+        /* Periodic visibility into pacing decisions. */
+        static int s_pace_log_cnt = 0;
+        if (++s_pace_log_cnt <= 5 || s_pace_log_cnt % 240 == 0) {
+            LOGI("frame_pacing: predicted_us=%llu vsync_us=%llu path=%s vsync_count=%llu (render_n=%u)",
+                 (unsigned long long)predicted, (unsigned long long)vsync_period_us,
+                 vsync_stream_live ? "phase-anchored" : "wall-clock-fallback",
+                 (unsigned long long)g_vsync_count,
+                 g_fp_render_count);
+        }
+
+        /* JITTER TRACE: how long this call blocked + delta-since-last-return. */
+        uint64_t wait_us = wait_return_us - wait_entry_us;
+        static uint64_t s_wait_prev = 0;
+        JTRACE("wait_return", &s_wait_prev, "wait_us=%llu presentId=%llu",
+               (unsigned long long)wait_us, (unsigned long long)presentId);
+
+        static int s_wait_cnt = 0;
+        if (++s_wait_cnt <= 10 || s_wait_cnt % 240 == 0) {
+            LOGI("layer_WaitForPresentKHR: presentId=%llu result=%d wait_us=%llu",
+                 (unsigned long long)presentId, (int)result,
+                 (unsigned long long)wait_us);
+        }
+        return result;
     }
     if (g_dev_dispatch.WaitForPresentKHR)
         return g_dev_dispatch.WaitForPresentKHR(device, swapchain, presentId, timeout);
@@ -896,6 +1364,44 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_QueuePresentKHR(
 
                 uint32_t ahb_slot = pPresentInfo->pImageIndices[i];
 
+                /* JITTER TRACE: time between successive QueuePresent calls.
+                 * This is DXVK's effective render cadence as seen by us. */
+                {
+                    static uint64_t s_present_prev = 0;
+                    JTRACE("present", &s_present_prev, "slot=%u", ahb_slot);
+                }
+
+                /* Frame pacing: record render time (acquire → present).
+                 *
+                 * Two guards against poisoning the prediction window:
+                 *   1. Skip the first FP_WARMUP_FRAMES samples — startup
+                 *      hitches (shader compile, first-asset load) don't
+                 *      represent steady-state render time.
+                 *   2. Discard outliers above 6×vsync (~100ms). Real games
+                 *      never sustain <10 FPS render times; anything beyond
+                 *      that is a hitch we don't want to feed back into pacing.
+                 */
+                {
+                    uint64_t now = mono_us();
+                    pthread_mutex_lock(&g_release_mtx);
+                    if (g_fp_last_acquire_us != 0) {
+                        uint64_t rt = now - g_fp_last_acquire_us;
+                        uint64_t vsync_us = g_fp_vsync_period_us;
+                        if (vsync_us < 4000)  vsync_us = 16667;
+                        if (vsync_us > 33334) vsync_us = 33334;
+                        uint64_t outlier_cap = vsync_us * 6;  /* ~100ms @ 60Hz */
+                        g_fp_render_seen++;
+                        if (g_fp_render_seen > FP_WARMUP_FRAMES
+                            && rt > 0 && rt < outlier_cap) {
+                            g_fp_render_times[g_fp_render_head] = rt;
+                            g_fp_render_head = (g_fp_render_head + 1) % FP_WINDOW;
+                            if (g_fp_render_count < FP_WINDOW) g_fp_render_count++;
+                        }
+                    }
+                    g_fp_last_acquire_us = 0;
+                    pthread_mutex_unlock(&g_release_mtx);
+                }
+
                 /* Extract DXVK's VkPresentIdKHR (pNext chain). It carries one
                  * presentId per swapchain in pPresentIds[]. Record (id, slot)
                  * so the release-reader thread can map MSG_RELEASE → "this
@@ -924,13 +1430,60 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_QueuePresentKHR(
                     pthread_mutex_unlock(&g_release_mtx);
                 }
 
+                /* Direct-render mode: DXVK already wrote the final image into
+                 * the AHB. No blit needed — we just need to convert DXVK's
+                 * render-complete wait semaphores into a SYNC_FD that
+                 * SurfaceFlinger can wait on. Standard Vulkan idiom: submit
+                 * zero command buffers, wait on the semaphores, signal a
+                 * fence. wine_ahb_queue_present exports the fence as SYNC_FD.
+                 *
+                 * Saved vs trojan-blit: ~1ms GPU blit, 4 image barriers, the
+                 * CB Begin/Record/End, and the entire trojan-image allocation
+                 * at swapchain creation. */
+                if (g_direct_render_mode
+                    && g_copy_fences[ahb_slot] != VK_NULL_HANDLE) {
+
+                    VkFence fence = g_copy_fences[ahb_slot];
+                    g_dev_dispatch.ResetFences(g_device, 1, &fence);
+
+                    VkPipelineStageFlags wait_stages[8];
+                    uint32_t wait_count = pPresentInfo->waitSemaphoreCount;
+                    if (wait_count > 8) wait_count = 8;
+                    for (uint32_t w_i = 0; w_i < wait_count; w_i++) {
+                        /* BOTTOM_OF_PIPE because there's no GPU work after
+                         * the wait — the fence signals as soon as the
+                         * semaphores resolve. */
+                        wait_stages[w_i] = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+                    }
+
+                    VkSubmitInfo si = {
+                        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                        .waitSemaphoreCount = wait_count,
+                        .pWaitSemaphores = wait_count ? pPresentInfo->pWaitSemaphores : NULL,
+                        .pWaitDstStageMask = wait_count ? wait_stages : NULL,
+                        .commandBufferCount = 0,
+                        .pCommandBuffers = NULL,
+                        .signalSemaphoreCount = 0,
+                        .pSignalSemaphores = NULL,
+                    };
+                    g_dev_dispatch.QueueSubmit(queue, 1, &si, fence);
+
+                    g_presented_ring[g_presented_idx] = (int)ahb_slot;
+                    g_presented_idx = (g_presented_idx + 1) % 2;
+
+                    /* DXVK wrote BGRA bytes into the AHB (Wine's winevulkan
+                     * thunk picks BGRA regardless of our surface-format
+                     * advertisement). Tell the receiver to do an R↔B swap
+                     * via its local format-aware blit. */
+                    wine_ahb_queue_present(g_ahb_swapchain, queue, ahb_slot, fence, present_id_this, /*bgra_bytes=*/1);
+                }
                 /* === BLIT INDIRECTION: copy trojan image → AHB image ===
                  * Per-slot resources prevent cross-frame fence reuse (Adreno timeout).
                  * DXVK's wait semaphores are forwarded to the blit submit so the copy
                  * doesn't start until DXVK finishes drawing the trojan image. The
                  * resulting fence is exported as a SYNC_FD by wine_ahb_queue_present
                  * and handed to SurfaceFlinger via the present_msg — no CPU wait. */
-                if (g_trojan_image_count > 0 && g_copy_cmd_bufs[ahb_slot] != VK_NULL_HANDLE
+                else if (g_trojan_image_count > 0 && g_copy_cmd_bufs[ahb_slot] != VK_NULL_HANDLE
                     && g_copy_fences[ahb_slot] != VK_NULL_HANDLE) {
 
                     VkCommandBuffer cb = g_copy_cmd_bufs[ahb_slot];
@@ -1078,7 +1631,14 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_QueuePresentKHR(
                      * exports it as SYNC_FD (VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT)
                      * and ships the fd to Android via SCM_RIGHTS. SurfaceFlinger
                      * waits on the sync_fd before scanout. */
-                    wine_ahb_queue_present(g_ahb_swapchain, queue, ahb_slot, fence, present_id_this);
+                    /* Trojan-blit path: the layer's vkCmdBlitImage copies
+                     * trojan (B8G8R8A8) → AHB (B8G8R8A8). With the pool
+                     * now allocating HAL_BGRA AHBs (matching DXVK's
+                     * preferred swapchain format), both ends of the blit
+                     * are the same format and the operation degenerates
+                     * to a byte copy. AHB memory holds BGRA bytes →
+                     * receiver should treat it as BGRA. */
+                    wine_ahb_queue_present(g_ahb_swapchain, queue, ahb_slot, fence, present_id_this, /*bgra_bytes=*/1);
                 } else {
                     /* Fallback path: no blit infrastructure — preserve pre-fix
                      * behavior of just draining wait semaphores and forwarding. */
@@ -1098,7 +1658,11 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_QueuePresentKHR(
                     }
                     g_presented_ring[g_presented_idx] = (int)ahb_slot;
                     g_presented_idx = (g_presented_idx + 1) % 2;
-                    wine_ahb_queue_present(g_ahb_swapchain, VK_NULL_HANDLE, ahb_slot, VK_NULL_HANDLE, present_id_this);
+                    /* Fallback: AHB content is whatever DXVK happened to
+                     * write with no layer-side translation. AHB pool is
+                     * HAL_BGRA so DXVK's BGRA writes match the byte layout —
+                     * flag as BGRA. */
+                    wine_ahb_queue_present(g_ahb_swapchain, VK_NULL_HANDLE, ahb_slot, VK_NULL_HANDLE, present_id_this, /*bgra_bytes=*/1);
                 }
 
                 static int _cnt = 0;
@@ -1106,8 +1670,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_QueuePresentKHR(
                 /* Log first 30 presents to make first-launch behavior visible
                  * (including any gaps caused by DXVK shader compile). */
                 if (_cnt <= 30 || (_cnt % 60 == 0))
-                    LOGI("layer_QueuePresentKHR: frame %d slot=%u blit=%s",
-                         _cnt, ahb_slot, g_trojan_image_count > 0 ? "yes" : "no");
+                    LOGI("layer_QueuePresentKHR: frame %d slot=%u mode=%s",
+                         _cnt, ahb_slot,
+                         g_direct_render_mode ? "direct"
+                                              : (g_trojan_image_count > 0 ? "trojan-blit" : "trojan-fallback"));
                 if (pPresentInfo->pResults) pPresentInfo->pResults[i] = VK_SUCCESS;
                 return VK_SUCCESS;
             }
@@ -1443,9 +2009,15 @@ AHBLayer_GetDeviceProcAddr_Export(VkDevice device, const char *pName)
     return AHBLayer_GetDeviceProcAddr(device, pName);
 }
 
-/* Constructor for diagnostics */
+/* Constructor for diagnostics + one-time env-var reads */
 __attribute__((constructor))
 static void ahb_layer_ctor(void)
 {
-    LOGI("[CTOR] libahb_layer.so loaded in PID=%d UID=%d", getpid(), getuid());
+    /* Direct-render mode: skip the trojan-blit step, render DXVK output
+     * directly into AHB-backed VkImages. See g_direct_render_mode docs. */
+    const char *direct_env = getenv("WINLATOR_AHB_DIRECT_RENDER");
+    g_direct_render_mode = (direct_env && direct_env[0] == '1');
+
+    LOGI("[CTOR] libahb_layer.so loaded in PID=%d UID=%d direct_render=%s",
+         getpid(), getuid(), g_direct_render_mode ? "ON" : "OFF");
 }

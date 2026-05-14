@@ -116,6 +116,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeScanoutSetCursorPos(long handle, short x, short y, short hotX, short hotY);
     private native boolean nativeIsScanoutActive(long handle);
     private native boolean nativeIsGameFrameDelivered(long handle);
+    private native long nativeGetDirectFrameCount(long handle);
     private native void nativeSetScanoutWindow(long handle, android.view.Surface game, android.view.Surface cursor);
     private native void nativeScanoutSetDst(long handle, int x, int y, int w, int h);
     private native void nativeStartPresentReceiver(long handle, int clientFd, long[] ahbPtrs, int screenWidth, int screenHeight);
@@ -173,8 +174,25 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     } else {
                         initComplete = true;
                         xServerView.queueEvent(this::updateScene);
-                        // Recreate SC layers if in nativeMode after successful reattach
-                        if (nativeMode) {
+                        // Recreate SC layers after successful reattach.
+                        //
+                        // Gate is "nativeMode OR DirectCompositor active": the
+                        // recv-thread DAC pipeline (used by direct-render mode)
+                        // bypasses VulkanRenderer.submitDirectFrame entirely
+                        // (it calls renderer->scanoutSetBuffer from C++), so
+                        // nativeMode stays false even when DAC frames are
+                        // flowing. Without this second condition, locking and
+                        // unlocking the device permanently freezes the game:
+                        // nativeReattachSurface calls destroyScanout(),
+                        // nulling scanoutGameSC; nothing then recreates it;
+                        // every subsequent scanoutSetBuffer hits the SKIPPED
+                        // path; SurfaceFlinger keeps showing the last frame
+                        // (or black) while DXVK keeps drawing into AHB pool
+                        // slots that never get displayed back.
+                        DirectCompositorComponent dccActive = directCompositorRef;
+                        boolean needScanoutRecreate = nativeMode
+                                || (dccActive != null && dccActive.isActive());
+                        if (needScanoutRecreate) {
                             xServerView.post(() -> {
                                 releaseScanoutSurfaces();
                                 if (android.os.Build.VERSION.SDK_INT >= 29) {
@@ -975,7 +993,19 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private WinlatorHUD hudRef = null;
 
     public void setFrameRating(Object fr) {
-        if (fr instanceof WinlatorHUD) hudRef = (WinlatorHUD) fr;
+        if (fr instanceof WinlatorHUD) {
+            hudRef = (WinlatorHUD) fr;
+            /* Wire a supplier so the HUD can read the DAC frame counter directly.
+             * Used when nativeMode is active — the X11 onUpdateWindowContent path
+             * that normally drives hud.onFrame() is disabled by
+             * xServer.setRenderingEnabled(false) after the first DAC frame, so
+             * the HUD's frameAccum stays at 0. */
+            hudRef.setNativeFrameCountSupplier(() -> {
+                final long h;
+                synchronized (lock) { h = nativeHandle; }
+                return h != 0 ? nativeGetDirectFrameCount(h) : 0L;
+            });
+        }
     }
 
     public boolean isFullscreen() { return fullscreen; }

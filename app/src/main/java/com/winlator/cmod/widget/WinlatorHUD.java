@@ -16,6 +16,7 @@ import android.view.View;
 
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.LongSupplier;
 
 public class WinlatorHUD extends View {
     private static final String PREFS    = "winlator_hud";
@@ -86,6 +87,14 @@ public class WinlatorHUD extends View {
 
     private final AtomicInteger frameAccum = new AtomicInteger(0);
     private long lastFpsNs = 0;
+    /* DAC frame-count supplier — set by VulkanRenderer.setFrameRating().
+     * Returns the native directFrameCount (monotonic, ticked in
+     * applyScanoutBuffer). When isNative is true and this is non-null,
+     * snapshot() uses it as the FPS source instead of frameAccum, which
+     * stays at 0 under DAC because the X11 window-update path that used
+     * to call onFrame() is disabled. */
+    private LongSupplier nativeFrameCountSupplier = null;
+    private long lastNativeFrameCount = -1;
     private float snapFps = 0;
 
     private int snapGpu=-1, snapCpu=-1, snapMw=-1, snapTmp=-1, snapPct=-1, snapRam=-1;
@@ -171,6 +180,11 @@ public class WinlatorHUD extends View {
 
     public void onFrame() { frameAccum.incrementAndGet(); }
 
+    public void setNativeFrameCountSupplier(LongSupplier s) {
+        this.nativeFrameCountSupplier = s;
+        this.lastNativeFrameCount = -1;  // reset delta baseline
+    }
+
     public void setIsNative(boolean n) {
         isNative = n;
         strRend = (isNative ? "+" : "") + rendererLabel;
@@ -184,7 +198,37 @@ public class WinlatorHUD extends View {
         if (lastFpsNs == 0) lastFpsNs = now;
         long dt = now - lastFpsNs;
         if (dt >= 350_000_000L) {
-            int f = frameAccum.getAndSet(0);
+            int f;
+            /* Auto-detect frame source. Don't gate on isNative — that flag
+             * only flips when the X11 path is alive (it's set in
+             * onUpdateWindowContent which DAC disables via
+             * xServer.setRenderingEnabled(false)). Under pure DAC we'd see
+             * isNative=false forever and never use the native counter.
+             *
+             * Strategy: if the native DAC counter advanced, use that delta.
+             * Else fall back to frameAccum (X11 path). This works for both
+             * modes and for the transition. */
+            int xPathFrames = frameAccum.getAndSet(0);
+            long nativeDelta = 0;
+            if (nativeFrameCountSupplier != null) {
+                long cur = nativeFrameCountSupplier.getAsLong();
+                if (lastNativeFrameCount < 0) lastNativeFrameCount = cur;
+                nativeDelta = cur - lastNativeFrameCount;
+                if (nativeDelta < 0) nativeDelta = 0;  // wraparound or reset
+                lastNativeFrameCount = cur;
+            }
+            f = (nativeDelta > 0)
+                    ? (int) Math.min((long) Integer.MAX_VALUE, nativeDelta)
+                    : xPathFrames;
+            /* Keep the "+" renderer-label indicator in sync with reality:
+             * if DAC frames are flowing, we're effectively in native mode
+             * regardless of whether anyone called setIsNative(true) on us. */
+            boolean shouldBeNative = (nativeDelta > 0);
+            if (shouldBeNative != isNative) {
+                isNative = shouldBeNative;
+                strRend = (isNative ? "+" : "") + rendererLabel;
+                layoutDirty = true;
+            }
             snapFps = f * 1_000_000_000f / dt;
             lastFpsNs = now;
             graph[gHead % GBUF] = snapFps;
@@ -551,6 +595,7 @@ public class WinlatorHUD extends View {
             snapFps = 0;
             gHead = 0;
             lastFpsNs = 0;
+            lastNativeFrameCount = -1;
             if (userEnabled) {
                 setVisibility(VISIBLE);
                 scheduleRedraw();
@@ -576,7 +621,7 @@ public class WinlatorHUD extends View {
             uiHandler.removeCallbacks(redrawRunnable);
             redrawScheduled = false;
             setVisibility(GONE);
-            frameAccum.set(0); snapFps = 0; gHead = 0; lastFpsNs = 0;
+            frameAccum.set(0); snapFps = 0; gHead = 0; lastFpsNs = 0; lastNativeFrameCount = -1;
         });
     }
 
@@ -617,7 +662,7 @@ public class WinlatorHUD extends View {
     }
 
     public void reset() {
-        rendererLabel = "Vulkan"; frameAccum.set(0); snapFps = 0; gHead = 0; lastFpsNs = 0;
+        rendererLabel = "Vulkan"; frameAccum.set(0); snapFps = 0; gHead = 0; lastFpsNs = 0; lastNativeFrameCount = -1;
     }
 
     /**
@@ -634,7 +679,7 @@ public class WinlatorHUD extends View {
             uiHandler.removeCallbacks(redrawRunnable);
             redrawScheduled = false;
             frameAccum.set(0);
-            snapFps = 0; gHead = 0; lastFpsNs = 0;
+            snapFps = 0; gHead = 0; lastFpsNs = 0; lastNativeFrameCount = -1;
             cachedPath = null; lastGHead = -1;
             dragging = false; touchDownMs = 0;
             rendererActive = true;

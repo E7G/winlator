@@ -1,6 +1,8 @@
 #include <jni.h>
 #include <android/native_window_jni.h>
 #include <android/hardware_buffer.h>
+#include <android/looper.h>
+#include <android/choreographer.h>
 #include <dlfcn.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -21,6 +23,8 @@
 /* Must match vulkan_ahb.h on the Wine side — protocol break if layouts diverge. */
 #define MSG_PRESENT 1
 #define MSG_RELEASE 2
+#define MSG_TICK    5
+#define MSG_VSYNC   6
 
 struct present_msg {
     uint8_t  type;
@@ -28,13 +32,23 @@ struct present_msg {
     int32_t  acquire_fd;
     int32_t  dst_x, dst_y, dst_w, dst_h;
     uint64_t present_id;   /* DXVK's VkPresentIdKHR.pPresentIds[i]; 0 if none */
+    uint8_t  bgra_bytes;   /* 1 = source AHB has BGRA byte order; do an R↔B
+                            * swap during the receiver's local blit (via
+                            * vkCmdBlitImage with B8G8R8A8 src + R8G8B8A8 dst).
+                            * 0 = AHB already has RGBA bytes; plain copy. */
 };
 
 struct release_msg {
-    uint8_t  type;         /* MSG_RELEASE */
+    uint8_t  type;         /* MSG_RELEASE / MSG_TICK / MSG_VSYNC */
     uint32_t slot_index;
     int32_t  release_fd;   /* -1 for now */
     uint8_t  displayed;    /* 1 = onComplete (frame shown), 0 = mailbox drop */
+    uint64_t vsync_time_ns; /* For MSG_VSYNC: AChoreographer frameTimeNanos.
+                             * Carries the real panel vsync timestamp so the
+                             * Wine-side layer can phase-anchor its wake
+                             * target on the actual vsync, not on the IPC
+                             * arrival time (which has thread-scheduling
+                             * variance). Ignored for non-VSYNC types. */
 };
 
 /* State for the native present-receiver thread */
@@ -47,13 +61,125 @@ struct PresentReceiverState {
     int screenHeight;
     std::atomic<bool> running{true};
     std::atomic<int> mailboxSlot{-1};  /* latest slot for display thread */
+    /* Sticky AHB byte-order flag, set by the recv thread from each
+     * present_msg.bgra_bytes. The layer's mode (direct-render vs
+     * trojan-blit) is pinned per swapchain, so this value is stable for
+     * the lifetime of the connection — recv writes it on every frame,
+     * display reads the latest value when it picks up a slot. */
+    std::atomic<int> sourceBgraBytes{0};
     pthread_t thread;
     pthread_t displayThread;
+    /* Phase-lock vsync source. Spawned at receiver-startup, it runs an
+     * AChoreographer callback loop on a dedicated thread; each panel
+     * vsync emits MSG_VSYNC on the same Wine IPC socket as MSG_RELEASE.
+     * The layer's release-reader thread consumes both, advancing a
+     * phase-locked counter that drives vkWaitForPresentKHR. */
+    pthread_t vsyncThread;
+    bool vsyncThreadStarted = false;
+    ALooper* vsyncLooper = nullptr;       /* owned by vsyncThread, woken via ALooper_wake */
+    AChoreographer* vsyncChoreographer = nullptr;
     int frameCount = 0;
     int prevSlotForRelease = -1;
 };
 
 static PresentReceiverState* g_presentReceiver = nullptr;
+
+/* AChoreographer frame callback. Fires once per real panel vsync. We send
+ * a single MSG_VSYNC to the Wine layer over the existing IPC socket and
+ * immediately re-register for the next vsync.
+ *
+ * Notes:
+ *   - send() is non-blocking (MSG_DONTWAIT) so a stuck Wine socket can NEVER
+ *     stall this callback. Vsync delivery is more important than guaranteed
+ *     delivery; if a packet is dropped, the layer will simply pace one
+ *     vsync late on the next iteration, which is recoverable.
+ *   - We re-post the callback from inside the callback (Choreographer is
+ *     one-shot per registration) to keep the stream alive.
+ *   - The callback runs on the vsyncThread, which has its own Looper. We
+ *     access only state->clientFd (atomic-stable int) and the Choreographer
+ *     instance; no other state mutation. */
+static void vsync_frame_callback(long frameTimeNanos, void* data);
+
+static void vsync_frame_callback(long frameTimeNanos, void* data) {
+    auto* state = reinterpret_cast<PresentReceiverState*>(data);
+    if (!state || !state->running.load()) return;
+
+    /* Send MSG_VSYNC on the IPC socket. release_msg layout, with
+     * vsync_time_ns carrying AChoreographer's frameTimeNanos — that's the
+     * REAL panel vsync timestamp in CLOCK_MONOTONIC ns. Putting it in the
+     * payload lets the Wine-side layer phase-anchor its wake target on
+     * the actual vsync moment rather than on its own recv time, which
+     * removes thread-scheduling latency from the anchor. */
+    struct release_msg msg{};
+    msg.type = (uint8_t)MSG_VSYNC;
+    msg.slot_index = 0;
+    msg.release_fd = -1;
+    msg.displayed = 0;
+    msg.vsync_time_ns = (uint64_t)frameTimeNanos;
+    int fd = state->clientFd;
+    if (fd >= 0) {
+        (void)send(fd, &msg, sizeof(msg), MSG_NOSIGNAL | MSG_DONTWAIT);
+    }
+
+    /* Re-register for the next vsync. */
+    if (state->vsyncChoreographer) {
+        AChoreographer_postFrameCallback(state->vsyncChoreographer,
+                                         vsync_frame_callback, data);
+    }
+}
+
+/* Choreographer thread: owns the Looper that hosts AChoreographer callbacks.
+ * AChoreographer requires a Looper-attached thread to call. We use a
+ * dedicated thread so the recv thread isn't blocked driving its own loop. */
+static void* vsync_thread_func(void* arg) {
+    auto* state = reinterpret_cast<PresentReceiverState*>(arg);
+    PRESENT_LOGI("vsync thread started (Choreographer phase-lock source)");
+
+    /* Prepare a Looper on this thread. ALOOPER_PREPARE_ALLOW_NON_CALLBACKS=0
+     * because we'll use AChoreographer_postFrameCallback which DOES use
+     * callbacks via the Choreographer's internal fd. */
+    state->vsyncLooper = ALooper_prepare(0);
+    if (!state->vsyncLooper) {
+        PRESENT_LOGE("vsync thread: ALooper_prepare failed; phase-lock disabled");
+        return nullptr;
+    }
+    /* Increment refcount so the Looper survives across thread teardown. */
+    ALooper_acquire(state->vsyncLooper);
+
+    state->vsyncChoreographer = AChoreographer_getInstance();
+    if (!state->vsyncChoreographer) {
+        PRESENT_LOGE("vsync thread: AChoreographer_getInstance failed; phase-lock disabled");
+        return nullptr;
+    }
+
+    /* Register the first callback. From here it's self-sustaining: each
+     * callback re-posts itself. */
+    AChoreographer_postFrameCallback(state->vsyncChoreographer,
+                                     vsync_frame_callback, state);
+    PRESENT_LOGI("vsync thread: first Choreographer callback posted");
+
+    /* Pump the Looper. ALooper_pollOnce is the supported successor to
+     * ALooper_pollAll (which the NDK marks obsoleted because it could
+     * silently swallow wakeups). pollOnce returns after one event/wake/
+     * timeout; we just loop on it. Stops when running goes false; we
+     * wake it from the receiver shutdown path via ALooper_wake. */
+    while (state->running.load()) {
+        int rc = ALooper_pollOnce(-1 /* block indefinitely */,
+                                  nullptr, nullptr, nullptr);
+        if (rc == ALOOPER_POLL_ERROR) {
+            PRESENT_LOGE("vsync thread: ALooper_pollOnce returned ERROR; exiting");
+            break;
+        }
+        /* ALOOPER_POLL_WAKE (-1) or ALOOPER_POLL_CALLBACK (-2) — re-check
+         * running and loop. */
+    }
+
+    ALooper_release(state->vsyncLooper);
+    state->vsyncLooper = nullptr;
+    state->vsyncChoreographer = nullptr;
+    PRESENT_LOGI("vsync thread exiting");
+    return nullptr;
+}
 
 /* Display thread: pulls from mailbox, calls scanoutSetBuffer (may block on vsync) */
 static void* display_thread_func(void* arg) {
@@ -77,8 +203,9 @@ static void* display_thread_func(void* arg) {
                 PRESENT_LOGI("display thread: initScanout done");
             }
         }
+        int bgraBytes = state->sourceBgraBytes.load(std::memory_order_acquire);
         state->renderer->scanoutSetBuffer(ahb, -1, slot,
-            0, 0, state->screenWidth, state->screenHeight);
+            0, 0, state->screenWidth, state->screenHeight, bgraBytes);
         /* Trigger the GPU blit + SurfaceFlinger submission immediately.
          * applyScanoutBuffer() blits from the source AHB to a LOCAL display buffer,
          * then submits the LOCAL buffer to SurfaceFlinger. This means the source AHB
@@ -100,6 +227,18 @@ static void* present_receiver_thread(void* arg) {
 
     /* Start the display thread */
     pthread_create(&state->displayThread, nullptr, display_thread_func, state);
+
+    /* Start the AChoreographer-driven vsync thread. This emits MSG_VSYNC
+     * on the same IPC socket once per real panel refresh and is what the
+     * layer's vkWaitForPresentKHR phase-locks against to eliminate
+     * scheduler-jitter "doubled motion" during fast camera motion. The
+     * layer has a wall-clock fallback for the brief startup window before
+     * the first MSG_VSYNC arrives, so failure here is non-fatal. */
+    if (pthread_create(&state->vsyncThread, nullptr, vsync_thread_func, state) == 0) {
+        state->vsyncThreadStarted = true;
+    } else {
+        PRESENT_LOGE("recv thread: failed to start vsync thread — pacing falls back to wall-clock");
+    }
 
     /* initScanout is called lazily on FIRST present_msg so SurfaceControl
      * layers are NOT created until we know real AHB frames will arrive.
@@ -193,7 +332,7 @@ static void* present_receiver_thread(void* arg) {
                      * actual display tick — the layer must NOT advance its vsync-paced
                      * display counter (used for vkWaitForPresentKHR). */
                     {
-                        struct release_msg drop_rel;
+                        struct release_msg drop_rel{};  /* zero-init vsync_time_ns */
                         drop_rel.type = MSG_RELEASE;
                         drop_rel.slot_index = slot;
                         drop_rel.release_fd = -1;
@@ -224,6 +363,13 @@ static void* present_receiver_thread(void* arg) {
             }
         }
 
+        /* Record the source AHB byte order from the layer (BGRA in
+         * direct-render mode, RGBA in trojan-blit mode). The display
+         * thread reads this when it picks up the next slot and tells the
+         * compositor whether to do an R↔B swap during the local blit. */
+        state->sourceBgraBytes.store(pmsg.bgra_bytes != 0 ? 1 : 0,
+                                     std::memory_order_release);
+
         /* Push the LATEST slot to the mailbox for the display thread. With true
          * mailbox semantics, Wine renders unthrottled up to the pool capacity; the
          * drain loop above sends immediate releases for skipped frames, and the
@@ -234,8 +380,17 @@ static void* present_receiver_thread(void* arg) {
         state->prevSlotForRelease = (int)slot;
     }
 
-    /* Stop and join display thread */
+    /* Stop and join display + vsync threads.
+     *
+     * Order: set running=false first so both threads notice on their next
+     * iteration. The vsync thread is blocked in ALooper_pollAll(-1) — wake
+     * it explicitly so it can re-check the running flag. */
     state->running.store(false);
+    if (state->vsyncThreadStarted) {
+        if (state->vsyncLooper) ALooper_wake(state->vsyncLooper);
+        pthread_join(state->vsyncThread, nullptr);
+        state->vsyncThreadStarted = false;
+    }
     pthread_join(state->displayThread, nullptr);
     PRESENT_LOGI("thread exiting");
     return nullptr;
@@ -479,6 +634,15 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_winlator_cmod_renderer_VulkanRenderer_nativeIsGameFrameDelivered(JNIEnv*, jobject, jlong handle) {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     return r ? (jboolean)r->gameFrameDelivered.load() : JNI_FALSE;
+}
+
+/* Counter of frames delivered via the DAC direct-compositing path. Polled by
+ * the HUD overlay each second to compute DAC-mode FPS. Returns 0 if the
+ * renderer handle isn't set up yet (e.g., very early in startup). */
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_winlator_cmod_renderer_VulkanRenderer_nativeGetDirectFrameCount(JNIEnv*, jobject, jlong handle) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    return r ? (jlong)r->directFrameCount.load(std::memory_order_relaxed) : 0L;
 }
 
 extern "C" JNIEXPORT void JNICALL
