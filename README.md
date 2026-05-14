@@ -8,9 +8,23 @@
 
 Winlator is an Android application that lets you run Windows (x86\_64) applications with Wine. It supports standard `x86_64` containers using Box86/Box64, as well as `Arm64EC` containers which utilize FEXCore (for 64/32-bit) or an optional WowBox64 (for 32-bit).
 
-This is a fork of the **Winlator Bionic** project by [Pipetto-crypto](https://github.com/Pipetto-crypto/winlator).
+This is a fork of the **Winlator Bionic** project by [Pipetto-crypto](https://github.com/Pipetto-crypto/winlator), continued from [StevenMXZ's Winlator-Ludashi 3.0](https://github.com/StevenMXZ/Winlator-Ludashi).
 
 and backup [Ludashi-backup](https://github.com/StevenMX-backup/Ludashi-Backup).
+
+## ✨ Why try this fork?
+
+The headline feature is **Direct Android Compositing (DAC)** — a new Vulkan present path that routes frames directly from DXVK to SurfaceFlinger, skipping the X11 server entirely for Vulkan-rendered games. What you actually feel:
+
+- 🎮 **Lower input latency.** One fewer compositor stage between the GPU and the display. Controls feel more responsive in fast-paced games (Broforce, Hollow Knight, GTA IV tested).
+- 🌊 **Smoother motion.** Vsync-aligned absolute-time sleeps replaced the previous render-pacing model. The historical "Performance mode jitter" on Vulkan games is largely gone on tested hardware.
+- 🔋 **Less GPU work in the compositor.** On overlay-capable devices (most Adreno phones), SurfaceFlinger picks the hardware overlay path — your game's frame goes to the display panel without any extra GPU compositing pass.
+- 🩹 **FIFO Vulkan games that froze in upstream Ludashi 3.0's Performance mode now work.** Vampire Survivors, Hollow Knight, GTA IV all run cleanly (fixes a slot-index mismatch in the trojan-blit pipeline).
+- 🔓 **Lock/unlock no longer leaves a black screen.** A long-standing lifecycle bug where the compositor stayed detached after device sleep is fixed.
+- 🎚️ **Per-game pipeline picker.** A new dropdown in Container Settings and per-shortcut Settings lets you choose **Quality (Direct-Render)**, **Performance (Trojan-Blit)**, or **Native (X11)** per game. If a title misbehaves under DAC, switch to Native in five seconds — no uninstall, no container changes.
+- ⏪ **Guaranteed upstream fallback.** The Native (X11) option is byte-for-byte the same code path as upstream Ludashi 3.0. You can never regress below upstream — if anything works there, you can always reach it here through the dropdown.
+
+**Safe to try.** If you're already running upstream Ludashi 3.0, your save data and Wine prefix are unaffected — the new dropdown defaults to Quality on existing containers but you can flip any individual shortcut back to Native at any time. Worst case, you set everything to Native and you're back to upstream behavior.
 
 ## ⚠️ Experimental — please read
 
