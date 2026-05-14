@@ -19,7 +19,7 @@ The headline feature is **Direct Android Compositing (DAC)** — a new Vulkan pr
 - 🎮 **Lower input latency.** One fewer compositor stage between the GPU and the display. Controls feel more responsive in fast-paced games (Broforce, Hollow Knight, GTA IV tested).
 - 🌊 **Smoother motion.** Vsync-aligned absolute-time sleeps replaced the previous render-pacing model. The historical "Performance mode jitter" on Vulkan games is largely gone on tested hardware.
 - 🔋 **Less GPU work in the compositor.** On overlay-capable devices (most Adreno phones), SurfaceFlinger picks the hardware overlay path — your game's frame goes to the display panel without any extra GPU compositing pass.
-- 🩹 **FIFO Vulkan games that froze in upstream Ludashi 3.0's Performance mode now work.** Vampire Survivors, Hollow Knight, GTA IV all run cleanly (fixes a slot-index mismatch in the trojan-blit pipeline).
+- 🩹 **FIFO Vulkan games that froze in Performance mode now work.** Vampire Survivors, Hollow Knight, GTA IV all run cleanly (fixes a slot-index mismatch in the trojan-blit pipeline).
 - 🔓 **Lock/unlock no longer leaves a black screen.** A long-standing lifecycle bug where the compositor stayed detached after device sleep is fixed.
 - 🎚️ **Per-game pipeline picker.** A new dropdown in Container Settings and per-shortcut Settings lets you choose **Quality (Direct-Render)**, **Performance (Trojan-Blit)**, or **Native (X11)** per game. If a title misbehaves under DAC, switch to Native in five seconds — no uninstall, no container changes.
 - ⏪ **Guaranteed upstream fallback.** The Native (X11) option is byte-for-byte the same code path as upstream Ludashi 3.0. You can never regress below upstream — if anything works there, you can always reach it here through the dropdown.
