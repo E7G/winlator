@@ -11,6 +11,19 @@ Winlator is an Android application that lets you run Windows (x86\_64) applicati
 This is a fork of the **Winlator Bionic** project by [Pipetto-crypto](https://github.com/Pipetto-crypto/winlator).
 
 and backup [Ludashi-backup](https://github.com/StevenMX-backup/Ludashi-Backup).
+
+## ⚠️ Experimental — please read
+
+This fork (`winlator-ludashi-plus`) is my **first contribution to the Winlator project** and **my first Android development project, period**. The Direct Android Compositing pipeline added here is non-trivial low-level work (Vulkan layer, AHardwareBuffer, SurfaceControl, IPC), and while every change has been verified end-to-end on my hardware, much of it is genuinely experimental.
+
+What this means in practice:
+
+- **Game compatibility may vary.** Vulkan games that work on upstream Ludashi 3.0 should still work here, but the DAC pipeline introduces a new code path. If a game misbehaves under the default *Quality (Direct-Render)* mode, try *Performance (Trojan-Blit)*, and if that still fails, switch to *Native (X11)* to fall back to upstream behavior. The dropdown is designed exactly for this.
+- **Bugs are likely.** Especially on hardware different from mine (Odin 2 Portal — Adreno 740, Android 13). Please open issues with logcat snippets and the Graphics Pipeline setting you were using.
+- **Performance is hardware-dependent.** Quality mode squeezes out the lowest latency on overlay-capable devices; Performance mode can be steadier on weaker GPUs. Try both per-game via the per-shortcut setting.
+- **Not a stable release.** Treat as a beta. Save game progress before testing on titles you care about.
+
+If you hit something that worked on upstream Ludashi 3.0 but doesn't here, that's a regression and I want to know — open an issue. If you hit something that didn't work upstream either, that's likely a Wine/Proton/game compatibility limit and the *Native (X11)* dropdown option will give you the same behavior as upstream.
 ## APK Build Explanations
 
 ### what is Ludashi?
@@ -50,6 +63,20 @@ with three options:
 The shortcut-level setting wins over the container-level setting when set,
 so you can keep most games on Quality and switch individual problem
 titles to Performance or Native without changing the container default.
+
+### Where to find it
+
+**Container-wide default** — Container Settings → Edit Container → *Graphics Pipeline*:
+
+<p align="center">
+  <img src="docs/screenshots/graphics-pipeline-container.png" alt="Graphics Pipeline dropdown in Container Settings" width="800">
+</p>
+
+**Per-game override** — Shortcuts → ⋮ on the game → Settings → *Graphics Pipeline*:
+
+<p align="center">
+  <img src="docs/screenshots/graphics-pipeline-shortcut.png" alt="Graphics Pipeline dropdown in Shortcut Settings" width="800">
+</p>
 
 # Useful Tips
 
