@@ -856,8 +856,13 @@ if (enableLogs) {
             int fm = shortcut != null ? shortcut.getRendererFilterMode()
                 : (container != null ? container.getRendererFilterMode() : 0);
             renderer.setFilterMode(fm);
+            /* 0 = "Device Refresh Rate". Default-fallback for a missing
+             * container was 60, which capped DAC at half-rate on 120 Hz
+             * panels (Window.preferredRefreshRate → SF apply rate → AHB
+             * slot-recycle rate). Matches Container.rendererRefreshRateLimit
+             * default of 0. */
             int refreshRateLimit = shortcut != null ? shortcut.getRendererRefreshRateLimit()
-                : (container != null ? container.getRendererRefreshRateLimit() : 60);
+                : (container != null ? container.getRendererRefreshRateLimit() : 0);
             applyRendererRefreshRatePreference(refreshRateLimit);
             renderer.setRefreshRateLimit(refreshRateLimit);
             boolean swapRB = shortcut != null ? shortcut.getRendererSwapRB()
