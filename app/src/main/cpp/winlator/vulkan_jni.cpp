@@ -304,6 +304,18 @@ static void* present_receiver_thread(void* arg) {
         if (state->frameCount <= 5 || (state->frameCount % 60 == 0))
             PRESENT_LOGI("thread: received slot=%u acquireFd=%d frame=%d", slot, acquireFd, state->frameCount);
 
+        /* === Unified FPS counter ===
+         * Each MSG_PRESENT received = one Wine frame, regardless of whether
+         * it ends up displayed or mailbox-dropped below. Used to be
+         * incremented in VulkanRendererContext::applyScanoutBuffer which
+         * ticked once per displayed frame (≤ panel vsync rate), so DAC
+         * reported display rate while Native reported Wine render rate —
+         * making the HUD FPS numbers misleadingly different. Moving it
+         * here makes both modes report "DXVK render rate" consistently. */
+        if (state->renderer) {
+            state->renderer->directFrameCount.fetch_add(1, std::memory_order_relaxed);
+        }
+
         /* initScanout is now handled by the display thread */
         (void)scanoutInitialized;
 
@@ -350,6 +362,12 @@ static void* present_receiver_thread(void* arg) {
                         memcpy(&acquireFd, CMSG_DATA(nc), sizeof(int));
                     }
                     state->frameCount++;
+                    /* Drained-and-replaced messages are also Wine frames
+                     * (they were just dropped before display). Count them
+                     * so the HUD reflects DXVK's true production rate. */
+                    if (state->renderer) {
+                        state->renderer->directFrameCount.fetch_add(1, std::memory_order_relaxed);
+                    }
                 } else {
                     /* Close any leaked fd from a non-matching drained message */
                     struct cmsghdr* nc = CMSG_FIRSTHDR(&next_msg);

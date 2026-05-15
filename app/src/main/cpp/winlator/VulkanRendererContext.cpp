@@ -2019,7 +2019,13 @@ void VulkanRendererContext::applyScanoutBuffer() {
     scanoutPrevDisplayedSlot = p.slotIndex;
 
     ST_APPLY(t);
-    directFrameCount.fetch_add(1, std::memory_order_relaxed);
+    /* directFrameCount used to be incremented HERE (per displayed frame)
+     * which gave DAC a panel-rate counter (≤ 60 FPS on a 60 Hz panel)
+     * while Native used a Wine-frame-rate counter — making the two modes
+     * report inherently incomparable FPS even when DXVK was producing at
+     * the same rate. Moved to the recv thread in vulkan_jni.cpp where it
+     * fires once per MSG_PRESENT (= once per Wine frame), making the
+     * DAC reading semantically match Native's hud.onFrame() count. */
     gameFrameDelivered.store(true);
     ST_DELETE(t);
     // AHardwareBuffer_release removed: no matching acquire, pool owns the ref
