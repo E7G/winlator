@@ -178,7 +178,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private GuestProgramLauncherComponent guestProgramLauncherComponent;
     private EnvVars overrideEnvVars;
 
-    private CheckBox cbFps, cbGpu, cbCpuRam, cbBattTemp, cbGraph, cbRenderer, cbRam;
+    private CheckBox cbFps, cbGpu, cbCpuRam, cbBattTemp, cbGraph, cbRenderer, cbRam, cbLatency;
 
     private static final int[] NATIVE_FPS_VALUES = { 0, 30, 45, 60, 90, 120 };
     private Spinner spNativeFPS;
@@ -856,8 +856,13 @@ if (enableLogs) {
             int fm = shortcut != null ? shortcut.getRendererFilterMode()
                 : (container != null ? container.getRendererFilterMode() : 0);
             renderer.setFilterMode(fm);
+            /* 0 = "Device Refresh Rate". Default-fallback for a missing
+             * container was 60, which capped DAC at half-rate on 120 Hz
+             * panels (Window.preferredRefreshRate → SF apply rate → AHB
+             * slot-recycle rate). Matches Container.rendererRefreshRateLimit
+             * default of 0. */
             int refreshRateLimit = shortcut != null ? shortcut.getRendererRefreshRateLimit()
-                : (container != null ? container.getRendererRefreshRateLimit() : 60);
+                : (container != null ? container.getRendererRefreshRateLimit() : 0);
             applyRendererRefreshRatePreference(refreshRateLimit);
             renderer.setRefreshRateLimit(refreshRateLimit);
             boolean swapRB = shortcut != null ? shortcut.getRendererSwapRB()
@@ -1094,6 +1099,7 @@ private void setupLeftSidebar() {
         cbGraph = findViewById(R.id.CBHudGraph);
         cbRenderer = findViewById(R.id.CBHudRenderer);
         cbRam = findViewById(R.id.CBHudRam);
+        cbLatency = findViewById(R.id.CBHudLatency);
 
         VulkanRenderer renderer = xServerView != null ? xServerView.getRenderer() : null;
         boolean isNative = renderer != null && renderer.isNativeMode();
@@ -1112,7 +1118,7 @@ private void setupLeftSidebar() {
 
         if (frameRating != null) {
             swHudMaster.setChecked(frameRating.getVisibility() == View.VISIBLE);
-            frameRating.syncCheckboxes(cbFps, cbGpu, cbCpuRam, cbBattTemp, cbGraph, cbRenderer);
+            frameRating.syncCheckboxes(cbFps, cbGpu, cbCpuRam, cbBattTemp, cbGraph, cbRenderer, cbLatency);
             android.content.SharedPreferences hudPrefs = getSharedPreferences("winlator_hud", MODE_PRIVATE);
             if (sbHudScale != null) {
                 float scale = hudPrefs.getFloat("hud_scale", 1f);
@@ -1146,6 +1152,7 @@ private void setupLeftSidebar() {
         if (cbBattTemp != null) cbBattTemp.setOnClickListener(hudListener);
         if (cbGraph != null) cbGraph.setOnClickListener(hudListener);
         if (cbRenderer != null) cbRenderer.setOnClickListener(hudListener);
+        if (cbLatency != null) cbLatency.setOnClickListener(hudListener);
 
         if (sbHudScale != null) {
             sbHudScale.setOnTouchListener((v, event) -> {
@@ -1213,6 +1220,7 @@ private void setupLeftSidebar() {
             frameRating.toggleElement(5, cbGraph.isChecked());
             frameRating.toggleElement(6, cbRenderer.isChecked());
             if (cbRam != null) frameRating.toggleElement(7, cbRam.isChecked());
+            if (cbLatency != null) frameRating.toggleElement(8, cbLatency.isChecked());
         }
     }
     private boolean restoreCurrentSidebarState() {

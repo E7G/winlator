@@ -195,6 +195,11 @@ static uint64_t g_display_count = 0;
  * Both fields read/written under g_release_mtx (cheap; uncontended). */
 static uint64_t g_vsync_count = 0;
 static uint64_t g_last_hardware_vsync_us = 0;
+/* Measured panel vsync period in µs. Updated each MSG_VSYNC from the
+ * arrival-delta EMA. Replaces the previous hardcoded 16667 µs (60 Hz)
+ * which was capping DAC at 60 FPS on 90/120/144 Hz panels. 0 until the
+ * second MSG_VSYNC arrives — callers fall back to the 60 Hz default. */
+static uint64_t g_vsync_period_us_measured = 0;
 
 static pthread_mutex_t g_release_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  g_release_cv  = PTHREAD_COND_INITIALIZER;
@@ -388,8 +393,27 @@ static void *release_reader_thread(void *arg) {
         if (rel.type == MSG_VSYNC) {
             uint64_t recv_us = mono_us();
             pthread_mutex_lock(&g_release_mtx);
+            uint64_t prev = g_last_hardware_vsync_us;
             g_vsync_count++;
             g_last_hardware_vsync_us = recv_us;
+            /* Measure the panel's actual vsync period from MSG_VSYNC arrival
+             * deltas. We used to hardcode 16667 µs (60 Hz), which on 90/120/144 Hz
+             * panels caused WaitForPresent's clock_nanosleep target to land at
+             * 60 Hz boundaries — effectively capping DAC at 60 FPS even on
+             * faster displays. The IPC delivery is jittery enough that a
+             * single delta is noisy; smooth with a heavy EMA so transient
+             * scheduler hiccups don't push the period around. Clamp to
+             * sane bounds (4-25 ms = 240 Hz down to 40 Hz) to ignore the
+             * occasional dropped-vsync outlier. */
+            if (prev != 0) {
+                uint64_t delta = recv_us - prev;
+                if (delta >= 4000ULL && delta <= 25000ULL) {
+                    uint64_t cur = g_vsync_period_us_measured;
+                    g_vsync_period_us_measured = (cur == 0)
+                        ? delta
+                        : (cur * 15 + delta) / 16;  /* 1/16 weight ≈ ~1 sec smoothing */
+                }
+            }
             pthread_mutex_unlock(&g_release_mtx);
             static uint64_t s_vsync_prev = 0;
             JTRACE("vsync", &s_vsync_prev, "count=%llu",
@@ -1093,10 +1117,24 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_AcquireNextImageKHR(
         s_acquire_counter++;
         int free_count = count_free_slots_locked(image_count);
 
+        /* WINLATOR_AHB_NO_PACING=1 also disables the FIFO back-pressure
+         * here. The WaitForPresent vsync sleep is one cap; this is the
+         * other — when image_count-1 frames are already queued, FIFO
+         * normally blocks the next acquire until a release arrives, which
+         * caps DXVK at the slot-release rate (= panel vsync rate). With
+         * the bypass set, acquire only blocks on TRUE saturation
+         * (free_count == 0), letting DXVK produce at GPU speed and rely
+         * on mailbox-drain in the receiver to discard the overflow. */
+        static int s_no_pacing_acquire = -1;
+        if (s_no_pacing_acquire < 0) {
+            const char *env = getenv("WINLATOR_AHB_NO_PACING");
+            s_no_pacing_acquire = (env && env[0] == '1') ? 1 : 0;
+        }
         for (;;) {
             int frames_in_flight = (int)image_count - free_count;
             bool need_block = (free_count == 0);
-            if (g_present_mode_requested == VK_PRESENT_MODE_FIFO_KHR
+            if (!s_no_pacing_acquire
+                && g_present_mode_requested == VK_PRESENT_MODE_FIFO_KHR
                 && s_acquire_counter > image_count
                 && frames_in_flight >= (int)image_count - 1) {
                 need_block = true;
@@ -1193,6 +1231,30 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_WaitForPresentKHR(
     uint64_t presentId, uint64_t timeout)
 {
     if (g_ahb_swapchain && g_real_swapchain_handle == swapchain) {
+        /* === Pacing bypass ===
+         * WINLATOR_AHB_NO_PACING=1 disables the vsync sleep entirely.
+         * DXVK still has its swapchain — the underlying mailbox/drop
+         * semantics in the receiver still cap displayed FPS to the panel
+         * rate — but DXVK is no longer artificially held back. Use this to
+         * confirm DAC's architectural throughput matches Native (i.e. the
+         * 60-FPS reading is the pacing, not a ceiling).
+         *
+         * Probed once per process via a static. Set once at the first call
+         * to keep the hot path branch-free after that. */
+        static int s_no_pacing = -1;
+        if (s_no_pacing < 0) {
+            const char *env = getenv("WINLATOR_AHB_NO_PACING");
+            s_no_pacing = (env && env[0] == '1') ? 1 : 0;
+            if (s_no_pacing) {
+                LOGI("layer_WaitForPresentKHR: WINLATOR_AHB_NO_PACING=1 — vsync sleep DISABLED, returning immediately");
+            }
+        }
+        if (s_no_pacing) {
+            /* Bookkeep enough state that fallback paths still work if the
+             * env var is unset on a future swapchain. */
+            g_fp_last_wait_return_us = mono_us();
+            return VK_SUCCESS;
+        }
         /* === Pillar 2 — phase-anchored absolute sleep ===
          *
          * Each call wakes at the NEXT panel-vsync-aligned boundary, using:
@@ -1236,7 +1298,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_WaitForPresentKHR(
                                  (now_us - vsync_anchor < 3 * 16667);
         pthread_mutex_unlock(&g_release_mtx);
 
-        const uint64_t vsync_period_us = 16667;  /* 60 Hz panel; future: query */
+        /* Use the measured panel period from MSG_VSYNC deltas — falls back
+         * to 16667 µs (60 Hz) if we haven't seen two vsyncs yet. */
+        pthread_mutex_lock(&g_release_mtx);
+        uint64_t measured = g_vsync_period_us_measured;
+        pthread_mutex_unlock(&g_release_mtx);
+        const uint64_t vsync_period_us = (measured != 0) ? measured : 16667ULL;
         VkResult result = VK_SUCCESS;
 
         /* Compute absolute wake target. */

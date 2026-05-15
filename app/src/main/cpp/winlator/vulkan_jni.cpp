@@ -304,6 +304,18 @@ static void* present_receiver_thread(void* arg) {
         if (state->frameCount <= 5 || (state->frameCount % 60 == 0))
             PRESENT_LOGI("thread: received slot=%u acquireFd=%d frame=%d", slot, acquireFd, state->frameCount);
 
+        /* === Unified FPS counter ===
+         * Each MSG_PRESENT received = one Wine frame, regardless of whether
+         * it ends up displayed or mailbox-dropped below. Used to be
+         * incremented in VulkanRendererContext::applyScanoutBuffer which
+         * ticked once per displayed frame (≤ panel vsync rate), so DAC
+         * reported display rate while Native reported Wine render rate —
+         * making the HUD FPS numbers misleadingly different. Moving it
+         * here makes both modes report "DXVK render rate" consistently. */
+        if (state->renderer) {
+            state->renderer->directFrameCount.fetch_add(1, std::memory_order_relaxed);
+        }
+
         /* initScanout is now handled by the display thread */
         (void)scanoutInitialized;
 
@@ -350,6 +362,12 @@ static void* present_receiver_thread(void* arg) {
                         memcpy(&acquireFd, CMSG_DATA(nc), sizeof(int));
                     }
                     state->frameCount++;
+                    /* Drained-and-replaced messages are also Wine frames
+                     * (they were just dropped before display). Count them
+                     * so the HUD reflects DXVK's true production rate. */
+                    if (state->renderer) {
+                        state->renderer->directFrameCount.fetch_add(1, std::memory_order_relaxed);
+                    }
                 } else {
                     /* Close any leaked fd from a non-matching drained message */
                     struct cmsghdr* nc = CMSG_FIRSTHDR(&next_msg);
@@ -369,6 +387,27 @@ static void* present_receiver_thread(void* arg) {
          * compositor whether to do an R↔B swap during the local blit. */
         state->sourceBgraBytes.store(pmsg.bgra_bytes != 0 ? 1 : 0,
                                      std::memory_order_release);
+
+        /* === LATENCY T1: Android-side arrival timestamp ===
+         * Stamp T1 for the *final* slot (after the mailbox drain loop above
+         * has potentially replaced `slot` with a newer one). The onCommit
+         * callback in applyScanoutBuffer reads this back to compute the
+         * compositor latency. Dropped-by-mailbox slots get overwritten by
+         * subsequent presents — only the displayed slot's T1 matters.
+         *
+         * Bounds-check against LATENCY_SLOT_MAX so we never write past the
+         * fixed-size array even if a malformed message slipped through.
+         * CLOCK_MONOTONIC matches the clock used in the onCommit callback,
+         * so the subtraction across threads is meaningful. */
+        if (state->renderer
+            && slot < (uint32_t)VulkanRendererContext::LATENCY_SLOT_MAX) {
+            struct timespec arrive_ts;
+            clock_gettime(CLOCK_MONOTONIC, &arrive_ts);
+            uint64_t arrive_us = (uint64_t)arrive_ts.tv_sec * 1000000ULL
+                              + (uint64_t)arrive_ts.tv_nsec / 1000ULL;
+            state->renderer->latencyArriveUs[slot]
+                .store(arrive_us, std::memory_order_relaxed);
+        }
 
         /* Push the LATEST slot to the mailbox for the display thread. With true
          * mailbox semantics, Wine renders unthrottled up to the pool capacity; the
@@ -643,6 +682,30 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_com_winlator_cmod_renderer_VulkanRenderer_nativeGetDirectFrameCount(JNIEnv*, jobject, jlong handle) {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     return r ? (jlong)r->directFrameCount.load(std::memory_order_relaxed) : 0L;
+}
+
+/* Returns the EMA of compositor latency in microseconds (T1 → T2 across the
+ * mailbox + SurfaceFlinger apply for DAC modes; onUpdateWindowContent →
+ * QueuePresentKHR-return for Native X11 mode). 0 means no data yet (first
+ * few frames before the EMA gets seeded). The HUD divides by 1000 and
+ * displays as "LAT XX.X ms". */
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_winlator_cmod_renderer_VulkanRenderer_nativeGetLatencyEmaUs(JNIEnv*, jobject, jlong handle) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    return r ? (jlong)r->latencyEmaUs.load(std::memory_order_relaxed) : 0L;
+}
+
+/* Native X11 latency T1: Java's onUpdateWindowContent calls this with
+ * System.nanoTime()/1000. CAS-from-0 so multi-window frames only count the
+ * first update; renderFrame's T2 swaps it back to 0 once the EMA is updated. */
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_renderer_VulkanRenderer_nativeSetX11FrameT1(JNIEnv*, jobject, jlong handle, jlong tsUs) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r || tsUs <= 0) return;
+    uint64_t expected = 0;
+    r->latencyX11ArriveUs.compare_exchange_strong(
+        expected, (uint64_t)tsUs,
+        std::memory_order_relaxed, std::memory_order_relaxed);
 }
 
 extern "C" JNIEXPORT void JNICALL

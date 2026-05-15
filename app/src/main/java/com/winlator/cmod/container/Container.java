@@ -81,7 +81,13 @@ public class Container {
     private String rendererPresentMode = "fifo";
     private String rendererDriverId    = "";
     private int rendererFilterMode = 0;
-    private int rendererRefreshRateLimit = 60;
+    /* 0 = "Device Refresh Rate" (uses pickHighestRefreshRate()).
+     * Used to default to 60, which on high-refresh panels (90/120/144 Hz)
+     * silently halved DAC's throughput — Window.preferredRefreshRate=60
+     * cascaded into SurfaceFlinger's apply rate and ultimately the AHB
+     * slot-recycle rate. New containers now opt into the device max so
+     * users don't have to discover the Renderer Options dialog. */
+    private int rendererRefreshRateLimit = 0;
     private boolean rendererSwapRB = false;
     private boolean fullscreenStretched;
     private byte startupSelection = STARTUP_SELECTION_ESSENTIAL;
@@ -455,7 +461,10 @@ public class Container {
             data.put("rendererPresentMode", rendererPresentMode);
             if (!rendererDriverId.isEmpty()) data.put("rendererDriverId", rendererDriverId);
             if (rendererFilterMode != 0) data.put("rendererFilterMode", rendererFilterMode);
-            if (rendererRefreshRateLimit != 60) data.put("rendererRefreshRateLimit", rendererRefreshRateLimit);
+            /* Persist only when the user explicitly chose a value (any non-zero).
+             * 0 is the default "Device Refresh Rate" — leaving it implicit lets
+             * future default changes apply automatically. */
+            if (rendererRefreshRateLimit != 0) data.put("rendererRefreshRateLimit", rendererRefreshRateLimit);
             if (rendererSwapRB) data.put("rendererSwapRB", true);
             data.put("emulator", emulator);
             data.put("dxwrapper", dxwrapper);

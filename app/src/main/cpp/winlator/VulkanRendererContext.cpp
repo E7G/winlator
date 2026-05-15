@@ -102,6 +102,12 @@ void VulkanRendererContext::loadDeviceDispatch() {
     LOAD_D2(GetSwapchainImagesKHR);
     LOAD_D2(AcquireNextImageKHR);
     LOAD_D2(QueuePresentKHR);
+    /* VK_GOOGLE_display_timing function pointers. Both are optional —
+     * displayTimingSupported gates whether they're used. The lookups
+     * return nullptr on devices without the extension; we still call
+     * LOAD_D2 unconditionally so the table is consistent. */
+    LOAD_D2(GetPastPresentationTimingGOOGLE);
+    LOAD_D2(GetRefreshCycleDurationGOOGLE);
     LOAD_D2(QueueSubmit);
     LOAD_D2(CreateRenderPass);
     LOAD_D2(DestroyRenderPass);
@@ -230,12 +236,25 @@ void VulkanRendererContext::createLogicalDevice() {
       for (auto& e:av) {
           if (strcmp(e.extensionName,"VK_EXT_filter_cubic")==0
            || strcmp(e.extensionName,"VK_IMG_filter_cubic")==0) cubicSupported=true;
+          /* VK_GOOGLE_display_timing: enables vkGetPastPresentationTimingGOOGLE
+           * which returns the CLOCK_MONOTONIC actualPresentTime for past
+           * presents. Used to measure accurate Native (X11) compositor
+           * latency — the previous T2 hook (QueuePresent-return) fires
+           * before SF has displayed the frame, biasing the reading low. */
+          if (strcmp(e.extensionName, VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME)==0)
+              displayTimingSupported = true;
       } }
     std::vector<const char*> extList = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME,
         VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME
     };
     if (cubicSupported) extList.push_back("VK_EXT_filter_cubic");
+    if (displayTimingSupported) extList.push_back(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME);
+    RLOG("createLogicalDevice: VK_GOOGLE_display_timing %s (LAT HUD T2: %s)",
+         displayTimingSupported ? "ENABLED" : "not available",
+         displayTimingSupported
+            ? "actual displayed-at time (accurate)"
+            : "QueuePresent-return (under-reports by ~1 vsync)");
     VkDeviceCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     ci.pQueueCreateInfos=&qi; ci.queueCreateInfoCount=1;
     ci.enabledExtensionCount=(uint32_t)extList.size(); ci.ppEnabledExtensionNames=extList.data();
@@ -974,8 +993,100 @@ ok=true;}catch(...){}
     VkSwapchainKHR scs[]={swapchain};
     VkPresentInfoKHR pi{}; pi.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
+
+    /* === NATIVE X11 LATENCY: VK_GOOGLE_display_timing setup ===
+     *
+     * If the extension is supported, attach a unique presentId to this
+     * present and record (presentId, arriveT1) in the ring buffer. After
+     * QueuePresent returns we'll query past timings — the driver tells
+     * us the CLOCK_MONOTONIC nanosecond at which each past presentId was
+     * actually displayed on the panel. That's an apples-to-apples T2 vs
+     * DAC's setOnCommit (which fires at SF apply-tick, i.e. "buffer is
+     * on the display").
+     *
+     * desiredPresentTime=0 means "display ASAP" — no pacing constraint,
+     * just give us back the actual time.
+     *
+     * Without the extension we fall back to the previous QueuePresent-
+     * return timing below — directionally useful but biased low by ~1 vsync. */
+    VkPresentTimeGOOGLE pt{};
+    VkPresentTimesInfoGOOGLE pti{};
+    uint64_t thisArriveT1 = latencyX11ArriveUs.exchange(0, std::memory_order_relaxed);
+    if (displayTimingSupported && thisArriveT1 != 0) {
+        uint64_t thisPresentId = nextPresentId++;
+        pt.presentID = thisPresentId;
+        pt.desiredPresentTime = 0;
+        pti.sType = VK_STRUCTURE_TYPE_PRESENT_TIMES_INFO_GOOGLE;
+        pti.pNext = nullptr;
+        pti.swapchainCount = 1;
+        pti.pTimes = &pt;
+        pi.pNext = &pti;
+        presentRing[presentRingHead] = { thisPresentId, thisArriveT1 };
+        presentRingHead = (presentRingHead + 1) % PRESENT_RING_SIZE;
+    }
+
     res=vk_.QueuePresentKHR(graphicsQueue,&pi);
     if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR) fbResized.store(true);
+
+    /* === T2 path A: query VK_GOOGLE_display_timing past timings ===
+     *
+     * vkGetPastPresentationTimingGOOGLE is non-blocking — returns whatever
+     * timings the driver has finalized (typically the present from ~2 frames
+     * ago). For each returned (presentId, actualPresentTime), look up the
+     * matching ring entry, compute T2 - T1, feed the EMA. */
+    if (displayTimingSupported && vk_.GetPastPresentationTimingGOOGLE
+        && res >= 0) {
+        uint32_t timingCount = 0;
+        vk_.GetPastPresentationTimingGOOGLE(device, swapchain, &timingCount, nullptr);
+        if (timingCount > 0) {
+            if (timingCount > PRESENT_RING_SIZE) timingCount = PRESENT_RING_SIZE;
+            VkPastPresentationTimingGOOGLE timings[PRESENT_RING_SIZE];
+            vk_.GetPastPresentationTimingGOOGLE(device, swapchain, &timingCount, timings);
+            for (uint32_t i = 0; i < timingCount; i++) {
+                /* actualPresentTime is CLOCK_MONOTONIC nanoseconds.
+                 * Convert to µs to match our EMA resolution. */
+                uint64_t displayedUs = timings[i].actualPresentTime / 1000ULL;
+                uint64_t pid = timings[i].presentID;
+                for (int j = 0; j < PRESENT_RING_SIZE; j++) {
+                    if (presentRing[j].presentId == pid
+                        && presentRing[j].arriveT1Us != 0) {
+                        if (displayedUs > presentRing[j].arriveT1Us) {
+                            uint64_t delta = displayedUs - presentRing[j].arriveT1Us;
+                            if (delta < 500000ULL) {  /* < 500 ms outlier guard */
+                                uint64_t prev = latencyEmaUs.load(std::memory_order_relaxed);
+                                uint64_t next = (prev == 0) ? delta : (prev * 7 + delta) / 8;
+                                latencyEmaUs.store(next, std::memory_order_relaxed);
+                            }
+                        }
+                        /* Mark consumed so a repeated echo doesn't double-count. */
+                        presentRing[j].arriveT1Us = 0;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    /* === T2 path B (fallback): QueuePresent-return ===
+     *
+     * Used on devices without VK_GOOGLE_display_timing. Same code as Phase 2:
+     * captures T2 immediately after QueuePresent returns. Under-reports the
+     * true compositor latency by ~1 vsync (SF queue + apply not included),
+     * but moves with the underlying compositor cost. */
+    else if (!displayTimingSupported && res >= 0 && thisArriveT1 != 0) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        uint64_t now_us = (uint64_t)ts.tv_sec * 1000000ULL
+                        + (uint64_t)ts.tv_nsec / 1000ULL;
+        if (now_us > thisArriveT1) {
+            uint64_t delta = now_us - thisArriveT1;
+            if (delta < 500000ULL) {
+                uint64_t prev = latencyEmaUs.load(std::memory_order_relaxed);
+                uint64_t next = (prev == 0) ? delta : (prev * 7 + delta) / 8;
+                latencyEmaUs.store(next, std::memory_order_relaxed);
+            }
+        }
+    }
+
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
 }
 
@@ -1803,19 +1914,25 @@ void VulkanRendererContext::applyScanoutBuffer() {
     // socket fd; we tick once per commit regardless of slot identity.
     if (fnSTSetOnCommit && sockFd >= 0) {
         typedef void (*pfn_STSetOnCommit)(void*, void*, void(*)(void*, void*));
-        struct OnCommitCtx { int socketFd; };
-        auto* ctx = new OnCommitCtx{sockFd};
+        /* Extended context: carry a back-pointer to the renderer + the slot
+         * being committed so the callback can compute T2 - T1 and update
+         * the latency EMA. Both are read inside the callback. */
+        struct OnCommitCtx { int socketFd; VulkanRendererContext* renderer; int slotIndex; };
+        auto* ctx = new OnCommitCtx{sockFd, this, p.slotIndex};
         ((pfn_STSetOnCommit)fnSTSetOnCommit)(t, (void*)ctx,
             [](void* context, void* stats) {
                 auto* c = reinterpret_cast<OnCommitCtx*>(context);
+                /* Capture T2 once — used by both the jitter trace AND the
+                 * compositor-latency EMA update below. */
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+                uint64_t now_us = (uint64_t)ts.tv_sec * 1000000ULL
+                                + (uint64_t)ts.tv_nsec / 1000ULL;
+
                 /* JITTER TRACE: SurfaceFlinger's onCommit firing rate.
                  * Compare against layer-side stage=tick to measure socket
                  * latency from SF → Android receiver → Wine release-reader. */
                 {
-                    struct timespec ts;
-                    clock_gettime(CLOCK_MONOTONIC, &ts);
-                    uint64_t now_us = (uint64_t)ts.tv_sec * 1000000ULL
-                                    + (uint64_t)ts.tv_nsec / 1000ULL;
                     static uint64_t s_commit_prev = 0;
                     uint64_t prev = s_commit_prev;
                     s_commit_prev = now_us;
@@ -1825,6 +1942,35 @@ void VulkanRendererContext::applyScanoutBuffer() {
                             (unsigned long long)(now_us - prev));
                     }
                 }
+
+                /* === COMPOSITOR LATENCY ===
+                 * T1 = recv-thread MSG_PRESENT timestamp stored in
+                 *      renderer->latencyArriveUs[slot]
+                 * T2 = now_us (this callback fires when SF latches the
+                 *      buffer at the next vsync — the "apply tick")
+                 * Update an EMA so the HUD can read a smoothed single number.
+                 * Drop outliers > 500 ms which would skew the EMA on first-
+                 * frame anomalies or pause windows. */
+                if (c->renderer
+                    && c->slotIndex >= 0
+                    && c->slotIndex < VulkanRendererContext::LATENCY_SLOT_MAX) {
+                    uint64_t arrive_us = c->renderer->latencyArriveUs[c->slotIndex]
+                        .load(std::memory_order_relaxed);
+                    if (arrive_us != 0 && now_us > arrive_us) {
+                        uint64_t delta = now_us - arrive_us;
+                        if (delta < 500000ULL) {
+                            uint64_t prev = c->renderer->latencyEmaUs
+                                .load(std::memory_order_relaxed);
+                            /* 1/8 weight on new sample → ~8-frame smoothing */
+                            uint64_t next = (prev == 0)
+                                ? delta
+                                : (prev * 7 + delta) / 8;
+                            c->renderer->latencyEmaUs
+                                .store(next, std::memory_order_relaxed);
+                        }
+                    }
+                }
+
                 /* Send a MSG_TICK packet using the release_msg wire format.
                  * Layout MUST match struct release_msg in vulkan_ahb.h EXACTLY,
                  * including the trailing vsync_time_ns field (added with the
@@ -1873,7 +2019,13 @@ void VulkanRendererContext::applyScanoutBuffer() {
     scanoutPrevDisplayedSlot = p.slotIndex;
 
     ST_APPLY(t);
-    directFrameCount.fetch_add(1, std::memory_order_relaxed);
+    /* directFrameCount used to be incremented HERE (per displayed frame)
+     * which gave DAC a panel-rate counter (≤ 60 FPS on a 60 Hz panel)
+     * while Native used a Wine-frame-rate counter — making the two modes
+     * report inherently incomparable FPS even when DXVK was producing at
+     * the same rate. Moved to the recv thread in vulkan_jni.cpp where it
+     * fires once per MSG_PRESENT (= once per Wine frame), making the
+     * DAC reading semantically match Native's hud.onFrame() count. */
     gameFrameDelivered.store(true);
     ST_DELETE(t);
     // AHardwareBuffer_release removed: no matching acquire, pool owns the ref

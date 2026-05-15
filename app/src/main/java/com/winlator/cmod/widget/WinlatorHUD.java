@@ -35,6 +35,7 @@ public class WinlatorHUD extends View {
     public static final int SHOW_GRAPH    = 1<<4;
     public static final int SHOW_RENDERER = 1<<5;
     public static final int SHOW_RAM      = 1<<6;
+    public static final int SHOW_LATENCY  = 1<<7;
     private static final int SHOW_DEFAULT = 0x6F;
 
     private static final int C_BG   = Color.argb(180, 0,   0,   0  );
@@ -47,6 +48,7 @@ public class WinlatorHUD extends View {
     private static final int C_FPS  = Color.rgb(0x76,0xFF,0x03);
     private static final int C_REND = Color.rgb(0xFF,0xEA,0x00);
     private static final int C_RAM  = Color.rgb(0xB0,0xFF,0xB0);
+    private static final int C_LAT  = Color.rgb(0x80,0xD8,0xFF);
     private static final int C_SEP  = Color.rgb(0x60,0x60,0x60);
 
     private float TS, TSR, PAD, GRAW, CORNER;
@@ -61,6 +63,7 @@ public class WinlatorHUD extends View {
     private final Paint pFps     = new Paint(TEXT_FLAGS);
     private final Paint pRend    = new Paint(TEXT_FLAGS);
     private final Paint pRam     = new Paint(TEXT_FLAGS);
+    private final Paint pLat     = new Paint(TEXT_FLAGS);
     private final Paint pSep     = new Paint(TEXT_FLAGS);
     private final Paint pChg     = new Paint(TEXT_FLAGS); // cached — avoids new Paint() every frame
     private final Paint pGraph   = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -68,8 +71,8 @@ public class WinlatorHUD extends View {
 
     private final RectF bgRect = new RectF();
 
-    private float wLabelGpu, wLabelCpu, wLabelRam, wLabelPwr, wLabelTmp, wLabelFps, wSep;
-    private float wVal100pct, wValFps, wValWatt, wValTemp;
+    private float wLabelGpu, wLabelCpu, wLabelRam, wLabelPwr, wLabelTmp, wLabelFps, wLabelLat, wSep;
+    private float wVal100pct, wValFps, wValWatt, wValTemp, wValLat;
 
     private float cachedHorizWidth = -1;
     private boolean layoutDirty = true;
@@ -77,6 +80,7 @@ public class WinlatorHUD extends View {
     private String strGpu = "N/A", strCpu = "N/A", strRam = "N/A";
     private String strPwr = "N/A", strTmp = "", strFps = "0";
     private String strRend = "Vulkan";
+    private String strLat = "—";
     private boolean snapCharging = false;
 
     private int lastBgAlpha = -1;
@@ -96,6 +100,13 @@ public class WinlatorHUD extends View {
     private LongSupplier nativeFrameCountSupplier = null;
     private long lastNativeFrameCount = -1;
     private float snapFps = 0;
+
+    /* DAC compositor-latency supplier. Returns the EMA in microseconds
+     * from the native VulkanRendererContext (T1 = recv MSG_PRESENT,
+     * T2 = SurfaceFlinger onCommit). Returns 0 when there's no DAC data
+     * (Native X11 mode, or the first few frames before the EMA seeds). */
+    private LongSupplier latencySupplier = null;
+    private long snapLatencyUs = 0;
 
     private int snapGpu=-1, snapCpu=-1, snapMw=-1, snapTmp=-1, snapPct=-1, snapRam=-1;
     private String rendererLabel = "Vulkan";
@@ -158,6 +169,7 @@ public class WinlatorHUD extends View {
         pFps.setColor(C_FPS);
         pRend.setTextSize(TSR);     pRend.setTypeface(mono); pRend.setColor(C_REND);
         pRam.setTextSize(TS);       pRam.setTypeface(mono);  pRam.setColor(C_RAM);
+        pLat.setTextSize(TS);       pLat.setTypeface(mono);  pLat.setColor(C_LAT);
         pSep.setTextSize(TS);       pSep.setTypeface(mono);  pSep.setColor(C_SEP);
         pChg.setTextSize(TS);       pChg.setTypeface(mono);  pChg.setColor(C_CHG);
         pGraph.setStyle(Paint.Style.STROKE); pGraph.setStrokeWidth(1.5f); pGraph.setColor(C_FPS);
@@ -169,11 +181,13 @@ public class WinlatorHUD extends View {
         wLabelPwr  = pBat.measureText("PWR ");
         wLabelTmp  = pTmp.measureText("TMP ");
         wLabelFps  = pFps.measureText("FPS ");
+        wLabelLat  = pLat.measureText("LAT ");
         wSep       = pSep.measureText(" | ");
         wVal100pct = pVal.measureText("100%");
         wValFps    = pFps.measureText("999");
         wValWatt   = pVal.measureText("9.9W");
         wValTemp   = pVal.measureText("99°C");
+        wValLat    = pVal.measureText("99.9ms");
     }
 
     public void setDataSource(HudDataSource ds) { this.dataSource = ds; }
@@ -183,6 +197,10 @@ public class WinlatorHUD extends View {
     public void setNativeFrameCountSupplier(LongSupplier s) {
         this.nativeFrameCountSupplier = s;
         this.lastNativeFrameCount = -1;  // reset delta baseline
+    }
+
+    public void setLatencySupplier(LongSupplier s) {
+        this.latencySupplier = s;
     }
 
     public void setIsNative(boolean n) {
@@ -259,6 +277,23 @@ public class WinlatorHUD extends View {
                 else                strPwr = "N/A";
             }
         }
+        /* Poll the DAC compositor-latency supplier. Returns the EMA in µs;
+         * 0 means no DAC data (Native mode or pre-seed). Convert to ms
+         * with 1 decimal of precision. The string is short ("16.7ms",
+         * "12.3ms") so layout invalidation is cheap. */
+        if (latencySupplier != null) {
+            long us = latencySupplier.getAsLong();
+            if (us != snapLatencyUs) {
+                snapLatencyUs = us;
+                strLat = (us == 0)
+                    ? "—"
+                    : String.format(Locale.US, "%.1fms", us / 1000f);
+                /* Width may change between "—" and a numeric value — mark
+                 * the cached horizontal width dirty so the next draw
+                 * re-measures. */
+                layoutDirty = true;
+            }
+        }
     }
 
     @Override
@@ -324,6 +359,11 @@ public class WinlatorHUD extends View {
                 drawInlineGraph(c, x, PAD, GRAW, TS + PAD);
             }
         }
+        if ((showMask & SHOW_LATENCY) != 0) {
+            x += drawSep(c, x, baseline);
+            c.drawText("LAT ", x, baseline, pLat); x += wLabelLat;
+            c.drawText(strLat, x, baseline, pVal); x += pVal.measureText(strLat);
+        }
     }
 
     private void drawVertical(Canvas c) {
@@ -369,6 +409,11 @@ public class WinlatorHUD extends View {
             float fb = y + TS + (pFps.getTextSize() - TS) / 2f;
             c.drawText("FPS ", PAD, fb, pFps);
             c.drawText(strFps, PAD + wLabelFps, fb, pFps);
+            y += lineH;
+        }
+        if ((showMask & SHOW_LATENCY) != 0) {
+            c.drawText("LAT ", PAD, y + TS, pLat);
+            c.drawText(strLat, PAD + wLabelLat, y + TS, pVal);
         }
     }
 
@@ -416,6 +461,7 @@ public class WinlatorHUD extends View {
         }
         if ((showMask & SHOW_FPS)   != 0) w += wLabelFps + wValFps;
         if ((showMask & SHOW_GRAPH) != 0) w += PAD + GRAW;
+        if ((showMask & SHOW_LATENCY) != 0) w += wSep + wLabelLat + Math.max(wValLat, pVal.measureText(strLat));
         return w + PAD;
     }
 
@@ -427,6 +473,7 @@ public class WinlatorHUD extends View {
         if ((showMask & SHOW_RAM)      != 0) w = Math.max(w, PAD * 2 + wLabelRam + wVal100pct);
         if ((showMask & SHOW_BATT)     != 0) w = Math.max(w, PAD * 2 + wLabelPwr + wValWatt);
         if ((showMask & SHOW_FPS)      != 0) w = Math.max(w, PAD * 2 + pFps.measureText("FPS 999"));
+        if ((showMask & SHOW_LATENCY)  != 0) w = Math.max(w, PAD * 2 + wLabelLat + wValLat);
         return w;
     }
 
@@ -446,6 +493,7 @@ public class WinlatorHUD extends View {
         if ((showMask & SHOW_RAM)      != 0) r++;
         if ((showMask & SHOW_BATT)     != 0) { r++; if (snapTmp > 0) r++; }
         if ((showMask & SHOW_FPS)      != 0) r++;
+        if ((showMask & SHOW_LATENCY)  != 0) r++;
         return Math.max(1, r);
     }
 
@@ -642,12 +690,23 @@ public class WinlatorHUD extends View {
     public void syncCheckboxes(android.widget.CheckBox cbFps, android.widget.CheckBox cbGpu,
             android.widget.CheckBox cbCpuRam, android.widget.CheckBox cbBattTemp,
             android.widget.CheckBox cbGraph, android.widget.CheckBox cbRenderer) {
+        syncCheckboxes(cbFps, cbGpu, cbCpuRam, cbBattTemp, cbGraph, cbRenderer, null);
+    }
+
+    /* Overload that also accepts the Latency checkbox so the sidebar state
+     * persists across launches. Older call sites without the LAT checkbox
+     * keep using the 6-arg version above. */
+    public void syncCheckboxes(android.widget.CheckBox cbFps, android.widget.CheckBox cbGpu,
+            android.widget.CheckBox cbCpuRam, android.widget.CheckBox cbBattTemp,
+            android.widget.CheckBox cbGraph, android.widget.CheckBox cbRenderer,
+            android.widget.CheckBox cbLatency) {
         if (cbFps      != null) cbFps.setChecked((showMask & SHOW_FPS)       != 0);
         if (cbGpu      != null) cbGpu.setChecked((showMask & SHOW_GPU)       != 0);
         if (cbCpuRam   != null) cbCpuRam.setChecked((showMask & SHOW_CPU)    != 0);
         if (cbBattTemp != null) cbBattTemp.setChecked((showMask & SHOW_BATT) != 0);
         if (cbGraph    != null) cbGraph.setChecked((showMask & SHOW_GRAPH)   != 0);
         if (cbRenderer != null) cbRenderer.setChecked((showMask & SHOW_RENDERER) != 0);
+        if (cbLatency  != null) cbLatency.setChecked((showMask & SHOW_LATENCY) != 0);
     }
 
     public void setHudScale(float scale) {
@@ -700,6 +759,7 @@ public class WinlatorHUD extends View {
             case 5: return SHOW_GRAPH;
             case 6: return SHOW_RENDERER;
             case 7: return SHOW_RAM;
+            case 8: return SHOW_LATENCY;
             default: return 0;
         }
     }

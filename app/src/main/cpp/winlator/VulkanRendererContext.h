@@ -29,6 +29,8 @@ struct VkTable {
     PFN_vkGetSwapchainImagesKHR GetSwapchainImagesKHR;
     PFN_vkAcquireNextImageKHR AcquireNextImageKHR;
     PFN_vkQueuePresentKHR QueuePresentKHR;
+    PFN_vkGetPastPresentationTimingGOOGLE GetPastPresentationTimingGOOGLE;
+    PFN_vkGetRefreshCycleDurationGOOGLE GetRefreshCycleDurationGOOGLE;
     PFN_vkQueueSubmit QueueSubmit;
     PFN_vkCreateRenderPass CreateRenderPass;
     PFN_vkDestroyRenderPass DestroyRenderPass;
@@ -155,6 +157,62 @@ public:
     std::atomic<bool> surfaceDetached{false};
     std::atomic<int>  scanoutSocketFd{-1};
     std::atomic<uint64_t> directFrameCount{0};
+
+    /* === Compositor-latency instrumentation (DAC modes only) ===
+     *
+     * T1 = recv thread reads MSG_PRESENT  →  stored in latencyArriveUs[slot]
+     * T2 = SurfaceFlinger setOnCommit callback fires for that slot
+     * latency = T2 - T1, exposed as an EMA via the HUD.
+     *
+     * Lock-free: T1 is written by the recv thread; T2/EMA is updated inside
+     * the onCommit callback (single writer). HUD reads the EMA via a JNI
+     * getter on a Choreographer tick (single reader, value may be a few
+     * frames stale — fine for a 60-sample-per-second display).
+     *
+     * Both clocks come from CLOCK_MONOTONIC which is kernel-wide on Linux,
+     * so the subtraction is meaningful even though the timestamps are
+     * captured on different threads. */
+    static constexpr int LATENCY_SLOT_MAX = 4;  /* matches AHB pool size */
+    std::atomic<uint64_t> latencyArriveUs[LATENCY_SLOT_MAX] = {};
+    std::atomic<uint64_t> latencyEmaUs{0};      /* 0 = no data yet */
+
+    /* Native (X11) mode latency. T1 stamped from Java's onUpdateWindowContent
+     * via the nativeSetX11FrameT1 JNI bridge. T2 used to be captured right
+     * after vkQueuePresentKHR returned, but that fires before SurfaceFlinger
+     * has actually displayed the frame — under-reporting the true compositor
+     * latency by ~1 vsync. The new path uses VK_GOOGLE_display_timing to ask
+     * the driver "what time was this presentId actually displayed?", giving
+     * an apples-to-apples comparison with DAC's setOnCommit timestamp.
+     *
+     * Compare-exchange-from-0 on the Java side: first update of a render
+     * cycle wins, subsequent updates (e.g. for additional windows in the
+     * same frame) are ignored. The QueuePresent path swaps it back to 0 so
+     * the next cycle can stamp fresh.
+     *
+     * Both X11 and DAC paths write to the SHARED latencyEmaUs above, since
+     * only one pipeline is active per session and the HUD reads a single
+     * number regardless of source. */
+    std::atomic<uint64_t> latencyX11ArriveUs{0};
+
+    /* === VK_GOOGLE_display_timing ring buffer ===
+     * For each Native present we attach a monotonic presentId via
+     * VkPresentTimesInfoGOOGLE and remember (presentId, T1) here. Later
+     * vkGetPastPresentationTimingGOOGLE returns the actualPresentTime
+     * (CLOCK_MONOTONIC ns) for past presents; we match presentId →
+     * arriveT1Us, compute the delta, and feed the EMA.
+     *
+     * Owned exclusively by the render thread (single-writer). The query
+     * pulls results into a transient local array each frame — no atomics
+     * needed beyond the EMA itself. */
+    bool displayTimingSupported = false;
+    uint64_t nextPresentId = 1;  /* 0 means "no timing requested" per spec */
+    static constexpr int PRESENT_RING_SIZE = 32;
+    struct PresentEntry {
+        uint64_t presentId;
+        uint64_t arriveT1Us;
+    };
+    PresentEntry presentRing[PRESENT_RING_SIZE] = {};
+    int presentRingHead = 0;
 
     void detachSurface();
     bool reattachSurface(ANativeWindow* newWindow);
