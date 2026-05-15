@@ -174,6 +174,21 @@ public:
     std::atomic<uint64_t> latencyArriveUs[LATENCY_SLOT_MAX] = {};
     std::atomic<uint64_t> latencyEmaUs{0};      /* 0 = no data yet */
 
+    /* Native (X11) mode latency. T1 stamped from Java's onUpdateWindowContent
+     * via the nativeSetX11FrameT1 JNI bridge; T2 captured inside renderFrame
+     * right after vkQueuePresentKHR returns. Single-slot atomic because the
+     * X11 path doesn't carry an explicit slot identity through the pipeline.
+     *
+     * Compare-exchange-from-0 on the Java side: first update of a render
+     * cycle wins, subsequent updates (e.g. for additional windows in the
+     * same frame) are ignored. T2 swaps it back to 0 so the next cycle
+     * can stamp fresh.
+     *
+     * Both X11 and DAC paths write to the SHARED latencyEmaUs above, since
+     * only one pipeline is active per session and the HUD reads a single
+     * number regardless of source. */
+    std::atomic<uint64_t> latencyX11ArriveUs{0};
+
     void detachSurface();
     bool reattachSurface(ANativeWindow* newWindow);
 

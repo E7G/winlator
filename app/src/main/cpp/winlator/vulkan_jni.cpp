@@ -667,13 +667,27 @@ Java_com_winlator_cmod_renderer_VulkanRenderer_nativeGetDirectFrameCount(JNIEnv*
 }
 
 /* Returns the EMA of compositor latency in microseconds (T1 → T2 across the
- * mailbox + SurfaceFlinger apply). 0 means no data yet (either Native X11
- * mode where the DAC pipeline isn't running, or the first few frames before
- * the EMA gets seeded). The HUD divides by 1000 and displays as "LAT XX.X ms". */
+ * mailbox + SurfaceFlinger apply for DAC modes; onUpdateWindowContent →
+ * QueuePresentKHR-return for Native X11 mode). 0 means no data yet (first
+ * few frames before the EMA gets seeded). The HUD divides by 1000 and
+ * displays as "LAT XX.X ms". */
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_winlator_cmod_renderer_VulkanRenderer_nativeGetLatencyEmaUs(JNIEnv*, jobject, jlong handle) {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     return r ? (jlong)r->latencyEmaUs.load(std::memory_order_relaxed) : 0L;
+}
+
+/* Native X11 latency T1: Java's onUpdateWindowContent calls this with
+ * System.nanoTime()/1000. CAS-from-0 so multi-window frames only count the
+ * first update; renderFrame's T2 swaps it back to 0 once the EMA is updated. */
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_renderer_VulkanRenderer_nativeSetX11FrameT1(JNIEnv*, jobject, jlong handle, jlong tsUs) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r || tsUs <= 0) return;
+    uint64_t expected = 0;
+    r->latencyX11ArriveUs.compare_exchange_strong(
+        expected, (uint64_t)tsUs,
+        std::memory_order_relaxed, std::memory_order_relaxed);
 }
 
 extern "C" JNIEXPORT void JNICALL

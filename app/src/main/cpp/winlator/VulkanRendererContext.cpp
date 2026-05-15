@@ -976,6 +976,40 @@ ok=true;}catch(...){}
     pi.waitSemaphoreCount=1; pi.pWaitSemaphores=sSem; pi.swapchainCount=1; pi.pSwapchains=scs; pi.pImageIndices=&imgIdx;
     res=vk_.QueuePresentKHR(graphicsQueue,&pi);
     if (res==VK_ERROR_OUT_OF_DATE_KHR||res==VK_ERROR_SURFACE_LOST_KHR) fbResized.store(true);
+
+    /* === NATIVE X11 LATENCY T2 ===
+     * If a Java-side T1 was stamped during this frame's onUpdateWindowContent,
+     * compute the compositor delta and update the shared EMA. Atomic exchange
+     * with 0 clears the slot so the next render cycle can stamp fresh.
+     *
+     * This makes the LAT HUD row work in Native mode too, using the same
+     * smoothing math as the DAC paths. Pipelines never run concurrently so
+     * the shared latencyEmaUs is consistent. */
+    /* Treat any non-error return as "frame went out the door." Vulkan
+     * returns VK_SUBOPTIMAL_KHR (1000001003) when the swapchain is fine
+     * but mismatched against the surface (e.g. rotation/size change pending) —
+     * the frame IS displayed, we just need to recreate the swapchain soon.
+     * An earlier `res == VK_SUCCESS` gate rejected this case, so T1 was never
+     * cleared and the EMA never updated in Native mode for swapchains that
+     * sit in VK_SUBOPTIMAL state (which is most of them on Android). */
+    if (res >= 0) {
+        uint64_t arrive_us = latencyX11ArriveUs.exchange(0, std::memory_order_relaxed);
+        if (arrive_us != 0) {
+            struct timespec ts;
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            uint64_t now_us = (uint64_t)ts.tv_sec * 1000000ULL
+                            + (uint64_t)ts.tv_nsec / 1000ULL;
+            if (now_us > arrive_us) {
+                uint64_t delta = now_us - arrive_us;
+                if (delta < 500000ULL) {  /* same outlier guard as DAC path */
+                    uint64_t prev = latencyEmaUs.load(std::memory_order_relaxed);
+                    uint64_t next = (prev == 0) ? delta : (prev * 7 + delta) / 8;
+                    latencyEmaUs.store(next, std::memory_order_relaxed);
+                }
+            }
+        }
+    }
+
     currentFrame=(currentFrame+1)%MAX_FRAMES_IN_FLIGHT;
 }
 
