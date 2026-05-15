@@ -1803,19 +1803,25 @@ void VulkanRendererContext::applyScanoutBuffer() {
     // socket fd; we tick once per commit regardless of slot identity.
     if (fnSTSetOnCommit && sockFd >= 0) {
         typedef void (*pfn_STSetOnCommit)(void*, void*, void(*)(void*, void*));
-        struct OnCommitCtx { int socketFd; };
-        auto* ctx = new OnCommitCtx{sockFd};
+        /* Extended context: carry a back-pointer to the renderer + the slot
+         * being committed so the callback can compute T2 - T1 and update
+         * the latency EMA. Both are read inside the callback. */
+        struct OnCommitCtx { int socketFd; VulkanRendererContext* renderer; int slotIndex; };
+        auto* ctx = new OnCommitCtx{sockFd, this, p.slotIndex};
         ((pfn_STSetOnCommit)fnSTSetOnCommit)(t, (void*)ctx,
             [](void* context, void* stats) {
                 auto* c = reinterpret_cast<OnCommitCtx*>(context);
+                /* Capture T2 once — used by both the jitter trace AND the
+                 * compositor-latency EMA update below. */
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+                uint64_t now_us = (uint64_t)ts.tv_sec * 1000000ULL
+                                + (uint64_t)ts.tv_nsec / 1000ULL;
+
                 /* JITTER TRACE: SurfaceFlinger's onCommit firing rate.
                  * Compare against layer-side stage=tick to measure socket
                  * latency from SF → Android receiver → Wine release-reader. */
                 {
-                    struct timespec ts;
-                    clock_gettime(CLOCK_MONOTONIC, &ts);
-                    uint64_t now_us = (uint64_t)ts.tv_sec * 1000000ULL
-                                    + (uint64_t)ts.tv_nsec / 1000ULL;
                     static uint64_t s_commit_prev = 0;
                     uint64_t prev = s_commit_prev;
                     s_commit_prev = now_us;
@@ -1825,6 +1831,35 @@ void VulkanRendererContext::applyScanoutBuffer() {
                             (unsigned long long)(now_us - prev));
                     }
                 }
+
+                /* === COMPOSITOR LATENCY ===
+                 * T1 = recv-thread MSG_PRESENT timestamp stored in
+                 *      renderer->latencyArriveUs[slot]
+                 * T2 = now_us (this callback fires when SF latches the
+                 *      buffer at the next vsync — the "apply tick")
+                 * Update an EMA so the HUD can read a smoothed single number.
+                 * Drop outliers > 500 ms which would skew the EMA on first-
+                 * frame anomalies or pause windows. */
+                if (c->renderer
+                    && c->slotIndex >= 0
+                    && c->slotIndex < VulkanRendererContext::LATENCY_SLOT_MAX) {
+                    uint64_t arrive_us = c->renderer->latencyArriveUs[c->slotIndex]
+                        .load(std::memory_order_relaxed);
+                    if (arrive_us != 0 && now_us > arrive_us) {
+                        uint64_t delta = now_us - arrive_us;
+                        if (delta < 500000ULL) {
+                            uint64_t prev = c->renderer->latencyEmaUs
+                                .load(std::memory_order_relaxed);
+                            /* 1/8 weight on new sample → ~8-frame smoothing */
+                            uint64_t next = (prev == 0)
+                                ? delta
+                                : (prev * 7 + delta) / 8;
+                            c->renderer->latencyEmaUs
+                                .store(next, std::memory_order_relaxed);
+                        }
+                    }
+                }
+
                 /* Send a MSG_TICK packet using the release_msg wire format.
                  * Layout MUST match struct release_msg in vulkan_ahb.h EXACTLY,
                  * including the trailing vsync_time_ns field (added with the

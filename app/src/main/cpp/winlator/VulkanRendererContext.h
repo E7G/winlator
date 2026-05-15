@@ -156,6 +156,24 @@ public:
     std::atomic<int>  scanoutSocketFd{-1};
     std::atomic<uint64_t> directFrameCount{0};
 
+    /* === Compositor-latency instrumentation (DAC modes only) ===
+     *
+     * T1 = recv thread reads MSG_PRESENT  →  stored in latencyArriveUs[slot]
+     * T2 = SurfaceFlinger setOnCommit callback fires for that slot
+     * latency = T2 - T1, exposed as an EMA via the HUD.
+     *
+     * Lock-free: T1 is written by the recv thread; T2/EMA is updated inside
+     * the onCommit callback (single writer). HUD reads the EMA via a JNI
+     * getter on a Choreographer tick (single reader, value may be a few
+     * frames stale — fine for a 60-sample-per-second display).
+     *
+     * Both clocks come from CLOCK_MONOTONIC which is kernel-wide on Linux,
+     * so the subtraction is meaningful even though the timestamps are
+     * captured on different threads. */
+    static constexpr int LATENCY_SLOT_MAX = 4;  /* matches AHB pool size */
+    std::atomic<uint64_t> latencyArriveUs[LATENCY_SLOT_MAX] = {};
+    std::atomic<uint64_t> latencyEmaUs{0};      /* 0 = no data yet */
+
     void detachSurface();
     bool reattachSurface(ANativeWindow* newWindow);
 

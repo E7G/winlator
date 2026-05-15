@@ -117,6 +117,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native boolean nativeIsScanoutActive(long handle);
     private native boolean nativeIsGameFrameDelivered(long handle);
     private native long nativeGetDirectFrameCount(long handle);
+    private native long nativeGetLatencyEmaUs(long handle);
     private native void nativeSetScanoutWindow(long handle, android.view.Surface game, android.view.Surface cursor);
     private native void nativeScanoutSetDst(long handle, int x, int y, int w, int h);
     private native void nativeStartPresentReceiver(long handle, int clientFd, long[] ahbPtrs, int screenWidth, int screenHeight);
@@ -1004,6 +1005,15 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                 final long h;
                 synchronized (lock) { h = nativeHandle; }
                 return h != 0 ? nativeGetDirectFrameCount(h) : 0L;
+            });
+            /* Compositor-latency supplier: feeds the LAT row when the
+             * user enables SHOW_LATENCY via the sidebar checkbox. Returns
+             * 0 when the DAC pipeline isn't running (Native X11 mode), in
+             * which case the HUD renders "—" instead of a value. */
+            hudRef.setLatencySupplier(() -> {
+                final long h;
+                synchronized (lock) { h = nativeHandle; }
+                return h != 0 ? nativeGetLatencyEmaUs(h) : 0L;
             });
         }
     }

@@ -370,6 +370,27 @@ static void* present_receiver_thread(void* arg) {
         state->sourceBgraBytes.store(pmsg.bgra_bytes != 0 ? 1 : 0,
                                      std::memory_order_release);
 
+        /* === LATENCY T1: Android-side arrival timestamp ===
+         * Stamp T1 for the *final* slot (after the mailbox drain loop above
+         * has potentially replaced `slot` with a newer one). The onCommit
+         * callback in applyScanoutBuffer reads this back to compute the
+         * compositor latency. Dropped-by-mailbox slots get overwritten by
+         * subsequent presents — only the displayed slot's T1 matters.
+         *
+         * Bounds-check against LATENCY_SLOT_MAX so we never write past the
+         * fixed-size array even if a malformed message slipped through.
+         * CLOCK_MONOTONIC matches the clock used in the onCommit callback,
+         * so the subtraction across threads is meaningful. */
+        if (state->renderer
+            && slot < (uint32_t)VulkanRendererContext::LATENCY_SLOT_MAX) {
+            struct timespec arrive_ts;
+            clock_gettime(CLOCK_MONOTONIC, &arrive_ts);
+            uint64_t arrive_us = (uint64_t)arrive_ts.tv_sec * 1000000ULL
+                              + (uint64_t)arrive_ts.tv_nsec / 1000ULL;
+            state->renderer->latencyArriveUs[slot]
+                .store(arrive_us, std::memory_order_relaxed);
+        }
+
         /* Push the LATEST slot to the mailbox for the display thread. With true
          * mailbox semantics, Wine renders unthrottled up to the pool capacity; the
          * drain loop above sends immediate releases for skipped frames, and the
@@ -643,6 +664,16 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_com_winlator_cmod_renderer_VulkanRenderer_nativeGetDirectFrameCount(JNIEnv*, jobject, jlong handle) {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
     return r ? (jlong)r->directFrameCount.load(std::memory_order_relaxed) : 0L;
+}
+
+/* Returns the EMA of compositor latency in microseconds (T1 → T2 across the
+ * mailbox + SurfaceFlinger apply). 0 means no data yet (either Native X11
+ * mode where the DAC pipeline isn't running, or the first few frames before
+ * the EMA gets seeded). The HUD divides by 1000 and displays as "LAT XX.X ms". */
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_winlator_cmod_renderer_VulkanRenderer_nativeGetLatencyEmaUs(JNIEnv*, jobject, jlong handle) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    return r ? (jlong)r->latencyEmaUs.load(std::memory_order_relaxed) : 0L;
 }
 
 extern "C" JNIEXPORT void JNICALL
