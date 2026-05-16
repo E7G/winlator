@@ -631,14 +631,41 @@ if (enableLogs) {
                 if (winHandler != null) winHandler.stop();
                 if (wineRequestHandler != null) wineRequestHandler.stop();
                 ProcessHelper.terminateAllWineProcesses();
-                long start = System.currentTimeMillis();
-                while (!ProcessHelper.listRunningWineProcesses().isEmpty()) {
-                    long elapsed = System.currentTimeMillis() - start;
-                    if (elapsed >= 1500) break;
-                }
-                preloaderDialog.closeOnUiThread();
-                int selectedMenuItemId = shortcut != null ? R.id.main_menu_shortcuts : R.id.main_menu_containers;
-                AppUtils.restartApplication(getApplicationContext(), selectedMenuItemId);
+
+                /* === FIX: pre-existing UI-thread freeze on sidebar exit ===
+                 *
+                 * The original code spun in a 100%-CPU busy-loop on the UI
+                 * thread for up to 1.5 s, polling listRunningWineProcesses()
+                 * (which scans /proc) as fast as the scheduler allowed.
+                 * Result: the screen visibly froze every time the user tapped
+                 * the sidebar's exit button — sometimes long enough that
+                 * Android nearly fired an ANR.
+                 *
+                 * Two problems with the original:
+                 *   1. No Thread.sleep between polls → CPU burn at 100%.
+                 *   2. Entire wait happened on the UI thread → screen frozen.
+                 *
+                 * Fix: spin off a worker thread that does the wait with a
+                 * 50 ms sleep between polls (≤ 30 iterations, ~1.5 s max), then
+                 * posts the cleanup back to the UI thread via runOnUiThread.
+                 * The UI thread stays responsive throughout; the preloader
+                 * "Shutting down…" dialog stays visible until the worker
+                 * completes; the restart fires from the UI thread as before. */
+                new Thread(() -> {
+                    long start = System.currentTimeMillis();
+                    while (!ProcessHelper.listRunningWineProcesses().isEmpty()) {
+                        if (System.currentTimeMillis() - start >= 1500) break;
+                        try { Thread.sleep(50); }
+                        catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+                    }
+                    runOnUiThread(() -> {
+                        preloaderDialog.closeOnUiThread();
+                        int selectedMenuItemId = shortcut != null
+                            ? R.id.main_menu_shortcuts
+                            : R.id.main_menu_containers;
+                        AppUtils.restartApplication(getApplicationContext(), selectedMenuItemId);
+                    });
+                }, "WineProcessWaitThread").start();
             }
         }, 1000);
     }
