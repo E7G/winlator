@@ -206,6 +206,73 @@ static pthread_cond_t  g_release_cv  = PTHREAD_COND_INITIALIZER;
 static pthread_t g_release_thread;
 static bool g_release_thread_running = false;
 
+/* === DYNAMIC POOL REALLOC (guest side) ===
+ * When DXVK requests a swapchain at a size the current AHB pool doesn't match,
+ * instead of falling back to passthrough (X11) we ask the Android receiver to
+ * reallocate the pool to the requested geometry. layer_CreateSwapchainKHR (the
+ * caller thread) fills the request via request_pool_realloc(), which sends
+ * MSG_REALLOC and blocks on g_release_cv. The release-reader thread — the sole
+ * socket reader — handles MSG_REALLOC_ACK: it receives N new handles, releases
+ * the old pool refs, swaps g_ahb_buffers, updates the count, and signals done.
+ *
+ * Refcount safety: each already-created swapchain's VkDeviceMemory holds its
+ * OWN AHB import reference (guaranteed by VK_ANDROID_external_memory_android_
+ * hardware_buffer — vkAllocateMemory acquires, vkFreeMemory releases). So
+ * releasing the pool's recvHandle ref here does NOT invalidate in-flight images;
+ * the old AHBs stay alive until those swapchains are destroyed. The Android
+ * receiver applies the same reasoning on its side (SurfaceFlinger holds the
+ * latched buffer), so the handshake is safe on both ends. */
+static bool g_realloc_done   = false;  /* ACK processed (request complete) */
+static int  g_realloc_result = 0;      /* new count on success; 0 = failed */
+
+/* Ask the Android receiver to reallocate the AHB pool to width×height×count.
+ * Returns true if the pool now matches; false → caller should use passthrough.
+ * Called from layer_CreateSwapchainKHR (NOT the release-reader thread). */
+static bool request_pool_realloc(uint32_t width, uint32_t height, uint32_t count)
+{
+    if (g_ahb_socket_fd < 0) return false;
+
+    pthread_mutex_lock(&g_release_mtx);
+    g_realloc_done   = false;
+    g_realloc_result = 0;
+    pthread_mutex_unlock(&g_release_mtx);
+
+    /* Overloaded present_msg, no ancillary fd. */
+    struct present_msg req;
+    memset(&req, 0, sizeof(req));
+    req.type       = MSG_REALLOC;
+    req.slot_index = width;
+    req.dst_x      = (int32_t)height;
+    req.dst_y      = (int32_t)count;
+    req.acquire_fd = -1;
+    if (send(g_ahb_socket_fd, &req, sizeof(req), MSG_NOSIGNAL) != (ssize_t)sizeof(req)) {
+        LOGE("request_pool_realloc: send failed: %s", strerror(errno));
+        return false;
+    }
+    LOGI("request_pool_realloc: requested %ux%u count=%u; waiting for ACK",
+         width, height, count);
+
+    /* Block until the release-reader processes MSG_REALLOC_ACK. 5s safety
+     * timeout so a dropped ACK can't hang the swapchain-create thread. */
+    pthread_mutex_lock(&g_release_mtx);
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += 5;
+    int rc = 0;
+    while (!g_realloc_done && rc == 0) {
+        rc = pthread_cond_timedwait(&g_release_cv, &g_release_mtx, &ts);
+    }
+    int result = g_realloc_done ? g_realloc_result : 0;
+    pthread_mutex_unlock(&g_release_mtx);
+
+    if (!g_realloc_done) {
+        LOGE("request_pool_realloc: timed out waiting for ACK");
+        return false;
+    }
+    LOGI("request_pool_realloc: ACK result count=%d", result);
+    return result > 0;
+}
+
 /* === FRAME PACING (Pillar 2 — Swappy-style predictor) ===
  *
  * Problem: DXVK render time is bimodal — most frames finish in time for the
@@ -448,6 +515,65 @@ static void *release_reader_thread(void *arg) {
             continue;
         }
 
+        /* MSG_REALLOC_ACK: the Android receiver reallocated the pool. slot_index
+         * carries the new count N (0 = realloc failed → stay on passthrough).
+         * On success, N new AHB handles follow contiguously (Android paused its
+         * vsync sender so nothing interleaves). Receive them OUTSIDE the mutex
+         * (recvHandle can block), then swap the pool under the mutex. */
+        if (rel.type == MSG_REALLOC_ACK) {
+            uint32_t n = rel.slot_index;
+            LOGI("release_reader_thread: MSG_REALLOC_ACK count=%u", n);
+            if (n == 0) {
+                pthread_mutex_lock(&g_release_mtx);
+                g_realloc_result = 0;
+                g_realloc_done   = true;
+                pthread_cond_broadcast(&g_release_cv);
+                pthread_mutex_unlock(&g_release_mtx);
+                continue;
+            }
+            if (n > AHB_MAX_IMAGES) n = AHB_MAX_IMAGES;
+
+            AHardwareBuffer *newbufs[AHB_MAX_IMAGES] = {NULL};
+            bool ok = true;
+            for (uint32_t i = 0; i < n; i++) {
+                AHardwareBuffer *ahb = NULL;
+                int r = AHardwareBuffer_recvHandleFromUnixSocket(g_ahb_socket_fd, &ahb);
+                if (r != 0 || !ahb) {
+                    LOGE("release_reader_thread: realloc recv handle %u failed: %d", i, r);
+                    ok = false;
+                    break;
+                }
+                newbufs[i] = ahb;
+            }
+
+            pthread_mutex_lock(&g_release_mtx);
+            if (ok) {
+                /* Release old pool refs. In-flight swapchains keep the old AHBs
+                 * alive via their own VkDeviceMemory import refs (see note at
+                 * the realloc globals). */
+                for (int i = 0; i < g_ahb_buffer_count; i++) {
+                    if (g_ahb_buffers[i]) AHardwareBuffer_release(g_ahb_buffers[i]);
+                    g_ahb_buffers[i] = NULL;
+                }
+                for (uint32_t i = 0; i < n; i++) g_ahb_buffers[i] = newbufs[i];
+                g_ahb_buffer_count = (int)n;
+                /* Reset mailbox slot-free state + presented history for the new
+                 * pool (the old slots no longer exist). */
+                for (uint32_t i = 0; i < AHB_MAX_IMAGES; i++)
+                    g_slot_free[i] = (i < n);
+                g_presented_ring[0] = g_presented_ring[1] = -1;
+                g_realloc_result = (int)n;
+            } else {
+                for (uint32_t i = 0; i < n; i++)
+                    if (newbufs[i]) AHardwareBuffer_release(newbufs[i]);
+                g_realloc_result = 0;
+            }
+            g_realloc_done = true;
+            pthread_cond_broadcast(&g_release_cv);
+            pthread_mutex_unlock(&g_release_mtx);
+            continue;
+        }
+
         if (rel.type != MSG_RELEASE) continue;
         if (rel.slot_index >= AHB_MAX_IMAGES) continue;
 
@@ -665,10 +791,35 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
     AHardwareBuffer_describe(g_ahb_buffers[0], &ahb_desc);
     if (pCreateInfo->imageExtent.width != ahb_desc.width ||
         pCreateInfo->imageExtent.height != ahb_desc.height) {
-        LOGI("layer_CreateSwapchainKHR: PASSTHROUGH (%dx%d != AHB %dx%d)",
-             pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height,
-             ahb_desc.width, ahb_desc.height);
-        return g_dev_dispatch.CreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
+        /* === DYNAMIC POOL ===
+         * The requested swapchain doesn't match the current AHB pool geometry.
+         * Rather than fall back to X11 passthrough (which loses DAC for this
+         * game entirely — e.g. GTA4's 640x400 D3D9 swapchain vs a 720p pool),
+         * ask the Android receiver to reallocate the pool to this geometry so
+         * we can still hook it. WINLATOR_AHB_NO_REALLOC=1 disables this and
+         * keeps the old static-pool passthrough behaviour. */
+        const char *env_no_realloc = getenv("WINLATOR_AHB_NO_REALLOC");
+        bool realloc_disabled = (env_no_realloc && env_no_realloc[0] == '1');
+        bool realloced = false;
+        if (!realloc_disabled) {
+            uint32_t want_n = pCreateInfo->minImageCount;
+            if (want_n < 2)              want_n = 2;
+            if (want_n > AHB_MAX_IMAGES) want_n = AHB_MAX_IMAGES;
+            if (request_pool_realloc(pCreateInfo->imageExtent.width,
+                                     pCreateInfo->imageExtent.height, want_n)) {
+                AHardwareBuffer_describe(g_ahb_buffers[0], &ahb_desc);
+                realloced = (pCreateInfo->imageExtent.width  == ahb_desc.width &&
+                             pCreateInfo->imageExtent.height == ahb_desc.height);
+                LOGI("layer_CreateSwapchainKHR: pool realloc'd to %ux%u count=%d (match=%d)",
+                     ahb_desc.width, ahb_desc.height, g_ahb_buffer_count, (int)realloced);
+            }
+        }
+        if (!realloced) {
+            LOGI("layer_CreateSwapchainKHR: PASSTHROUGH (%dx%d != AHB %ux%u)",
+                 pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height,
+                 ahb_desc.width, ahb_desc.height);
+            return g_dev_dispatch.CreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
+        }
     }
 
     /* === DIAGNOSTIC TOGGLE ===

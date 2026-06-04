@@ -46,6 +46,21 @@
  * the same struct layout as release_msg (type=6, other fields ignored). */
 #define MSG_VSYNC    6
 
+/* === DYNAMIC POOL REALLOC ===
+ * MSG_REALLOC (Wine → Android): request the receiver to reallocate the AHB pool
+ * to a new geometry/count so a swapchain whose size differs from the initial
+ * pool can still be hooked (instead of falling back to X11 passthrough). Sent as
+ * an overloaded present_msg with NO ancillary fd:
+ *     type=MSG_REALLOC, slot_index=width, dst_x=height, dst_y=count.
+ * MSG_REALLOC_ACK (Android → Wine): the receiver reallocated the pool; N new AHB
+ * handles follow contiguously (sent via AHardwareBuffer_sendHandleToUnixSocket).
+ * Sent as an overloaded release_msg: type=MSG_REALLOC_ACK, slot_index=N. N=0
+ * means the realloc failed and the guest must stay on passthrough. The receiver
+ * pauses its vsync sender across the handshake so the ACK + N handles arrive
+ * contiguously on the socket with nothing interleaved. */
+#define MSG_REALLOC     8
+#define MSG_REALLOC_ACK 9
+
 /* Maximum swapchain images */
 #define AHB_MAX_IMAGES 4
 
