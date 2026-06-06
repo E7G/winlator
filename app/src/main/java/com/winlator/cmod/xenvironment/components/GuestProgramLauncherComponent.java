@@ -382,11 +382,55 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         envVars.put("FAKE_EVDEV_DIR", devInputDir.getAbsolutePath());
         envVars.put("FAKE_EVDEV_VIBRATION", "1");
 
-        // Direct Android Compositing is loaded as a Vulkan implicit layer
-        // (libahb_layer.so / ahb_layer.json), not via LD_PRELOAD. The legacy
-        // LD_PRELOAD interceptor (libahb_preload.so) was abandoned because
-        // Wine's winevulkan caches function pointers and bypasses RTLD_NEXT
-        // for device-level Vulkan calls.
+        // === Direct Android Compositing layer deployment ===
+        //
+        // DAC is a Vulkan implicit layer (libahb_layer.so + ahb_layer.json),
+        // not an LD_PRELOAD. The Vulkan loader discovers it via VK_LAYER_PATH
+        // (set below to imagefs/usr/share/vulkan/implicit_layer.d) and loads
+        // the .so by the manifest's library_path (bare soname "libahb_layer.so",
+        // resolved via LD_LIBRARY_PATH which includes imagefs/usr/lib).
+        //
+        // The layer .so ships in the APK's jniLibs (extracted to nativeLibDir
+        // on install); the manifest ships in assets/. Neither lives in the
+        // downloaded imagefs rootfs, so we copy both into the container here on
+        // every launch. Without this, a freshly-installed app has no layer in
+        // the container and DAC silently never activates (the loader skips an
+        // unknown VK_INSTANCE_LAYERS entry) — the game falls back to the X11
+        // path regardless of the Graphics Pipeline setting.
+        //
+        // Deployed unconditionally (idempotent): the manifest's
+        // disable_environment key (DISABLE_AHB_LAYER=1, set for Native mode
+        // below) is what actually gates the layer per-launch, so it is safe
+        // and correct for the files to always be present.
+        try {
+            File ahbLayerDest = new File(imageFs.getLibDir(), "libahb_layer.so");
+            File ahbLayerSrc = new File(nativeLibDir, "libahb_layer.so");
+            if (ahbLayerSrc.exists()
+                    && (!ahbLayerDest.exists() || ahbLayerDest.length() != ahbLayerSrc.length())) {
+                FileUtils.copy(ahbLayerSrc, ahbLayerDest);
+                Log.d("GuestLauncher", "Deployed libahb_layer.so to imagefs ("
+                        + ahbLayerDest.length() + " bytes)");
+            } else if (!ahbLayerSrc.exists()) {
+                Log.e("GuestLauncher", "libahb_layer.so NOT FOUND in APK nativeLibDir: "
+                        + ahbLayerSrc.getAbsolutePath());
+            }
+
+            File implicitLayerDir = new File(imageFs.getRootDir(),
+                    "usr/share/vulkan/implicit_layer.d");
+            implicitLayerDir.mkdirs();
+            File ahbManifestDest = new File(implicitLayerDir, "ahb_layer.json");
+            byte[] manifestBytes = FileUtils.read(environment.getContext(), "ahb_layer.json");
+            if (manifestBytes != null) {
+                FileUtils.write(ahbManifestDest, manifestBytes);
+                Log.d("GuestLauncher", "Deployed ahb_layer.json to "
+                        + ahbManifestDest.getAbsolutePath());
+            } else {
+                Log.e("GuestLauncher", "ahb_layer.json NOT FOUND in APK assets");
+            }
+        } catch (Exception e) {
+            Log.e("GuestLauncher", "Failed to deploy DAC layer: " + e.getMessage());
+            e.printStackTrace();
+        }
 
         Log.d("GuestLauncher", "Final LD_PRELOAD: " + ld_preload);
         envVars.put("LD_PRELOAD", ld_preload);
