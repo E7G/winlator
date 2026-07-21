@@ -365,9 +365,17 @@ public abstract class FileUtils {
 
         if ("primary".equalsIgnoreCase(type)) {
             return Environment.getExternalStorageDirectory() + "/" + path;
-        } else {
-            return "/mnt/media_rw/" + type + "/" + path;
         }
+
+        // Removable volumes (SD cards, USB OTG) are exposed to apps at /storage/<uuid>.
+        // /mnt/media_rw/<uuid> is the privileged mount owned by the media_rw group, so
+        // neither the app nor the container can read it: the drive is mapped but shows
+        // up empty. Prefer the app-visible path whenever it resolves.
+        String volumePath = "/storage/" + type + (path.isEmpty() ? "" : "/" + path);
+        if (new File(volumePath).exists()) return volumePath;
+
+        Log.w(TAG, volumePath + " is not accessible, falling back to /mnt/media_rw");
+        return "/mnt/media_rw/" + type + "/" + path;
     }
 
 
