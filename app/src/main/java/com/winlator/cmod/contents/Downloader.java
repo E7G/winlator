@@ -10,6 +10,7 @@ import java.io.OutputStream;
 import com.winlator.cmod.core.Callback;
 import java.net.URL;
 import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
 
 public class Downloader {
 
@@ -21,6 +22,9 @@ public class Downloader {
         try {
             URL url = new URL(address);
             URLConnection connection = url.openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(60000);
+            connection.setRequestProperty("User-Agent", "Winlator-E7G/3.1");
             connection.connect();
 
             long contentLength = connection.getContentLengthLong();
@@ -56,10 +60,13 @@ public class Downloader {
         try {
             URL url = new URL(address);
             URLConnection connection = url.openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(60000);
+            connection.setRequestProperty("User-Agent", "Winlator-E7G/3.1");
             connection.connect();
 
-            InputStream input = url.openStream();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
+            InputStream input = connection.getInputStream();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
             StringBuilder sb = new StringBuilder();
             String line = null;
             while ((line = reader.readLine()) != null) {
