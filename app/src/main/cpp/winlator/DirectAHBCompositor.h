@@ -36,7 +36,7 @@ public:
     bool isPresenting() const { return presenting.load(std::memory_order_acquire); }
     bool isRunning() const { return running.load(std::memory_order_acquire); }
 
-private:
+    // Wire layout shared with the Plus AHB Vulkan layer. Keep ABI stable.
     struct PresentMsg {
         uint8_t type;
         uint32_t slotIndex;
@@ -53,6 +53,7 @@ private:
         uint64_t vsyncTimeNs;
     };
 
+private:
     bool loadApiLocked();
     bool createLayersLocked(ANativeWindow* parentWindow, float refreshRate);
     void destroyLayersLocked();
