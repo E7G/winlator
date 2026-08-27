@@ -14,9 +14,10 @@
 - Ludashi 3.1 最新修复：可移动存储映射、FEX 环境变量、相对鼠标/CPU affinity、新 VulkanRenderer 架构等。
 - Ludashi Plus 已被 3.1 吸收的退出不卡 UI 优化。
 - 3.1 中更新的 Box64/WOWBox64 0.4.2、Turnip 26.2.0 等组件，不回退到 Plus 的旧版本。
-- 简体中文核心 UI 资源（`values-zh-rCN`）。
+- 简体中文 UI 资源（`values-zh-rCN`），当前 `strings.xml` 588/588 键全覆盖。
 - Gradle 8.10.2 构建链。
 - GitHub Actions 自动编译 APK；`main` 构建成功后自动创建 GitHub Release 并上传 APK。
+- 在线组件采用主源 + E7G 精选补充源：Box64/WOWBox64 0.4.4、FEX 2608、DXVK 3.0.2、VKD3D-Proton 3.0.1；Turnip 驱动源提供 26.3.0 Nightly。
 
 ## 关于 Ludashi Plus DAC
 
