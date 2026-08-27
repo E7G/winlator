@@ -1,6 +1,5 @@
 package com.winlator.cmod.core;
 
-import android.os.Process;
 import android.util.Log;
 
 import java.io.BufferedReader;
@@ -24,7 +23,7 @@ public final class RootPerformanceManager {
     private RootPerformanceManager() {}
 
     private static String statePath() {
-        return "/data/local/tmp/winlator-e7g-rootperf-" + Process.myUid() + ".state";
+        return "/data/local/tmp/winlator-e7g-rootperf-" + android.os.Process.myUid() + ".state";
     }
 
     public static boolean isActive() {
