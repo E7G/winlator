@@ -45,7 +45,7 @@ public class RepositoryManagerDialog {
 
     public void show() {
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle("Driver Sources"); // English
+        builder.setTitle(R.string.driver_sources);
 
         recyclerView = new RecyclerView(context);
         recyclerView.setBackgroundColor(Color.BLACK);
@@ -57,8 +57,8 @@ public class RepositoryManagerDialog {
 
         builder.setView(recyclerView);
         
-        builder.setPositiveButton("Add Source", (d, w) -> showRepoDialog(null, -1));
-        builder.setNegativeButton("Close", null);
+        builder.setPositiveButton(R.string.add_source, (d, w) -> showRepoDialog(null, -1));
+        builder.setNegativeButton(R.string.close, null);
 
         dialog = builder.create();
         dialog.show();
@@ -68,14 +68,14 @@ public class RepositoryManagerDialog {
     
     private void showRepoDialog(DriverRepo repoToEdit, int position) {
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle(repoToEdit == null ? "Add Repository" : "Edit Repository");
+        builder.setTitle(repoToEdit == null ? R.string.add_repository : R.string.edit_repository);
 
         final EditText inputName = new EditText(context);
-        inputName.setHint("Name (e.g. Turnip Drivers)");
+        inputName.setHint(R.string.driver_repo_name_hint);
         if (repoToEdit != null) inputName.setText(repoToEdit.name);
         
         final EditText inputUrl = new EditText(context);
-        inputUrl.setHint("GitHub API URL");
+        inputUrl.setHint(R.string.github_api_url_hint);
         if (repoToEdit != null) inputUrl.setText(repoToEdit.apiUrl);
 
         android.widget.LinearLayout layout = new android.widget.LinearLayout(context);
@@ -85,7 +85,7 @@ public class RepositoryManagerDialog {
         layout.addView(inputUrl);
         builder.setView(layout);
 
-        builder.setPositiveButton("Save", (d, w) -> {
+        builder.setPositiveButton(R.string.save, (d, w) -> {
             String name = inputName.getText().toString().trim();
             String url = inputUrl.getText().toString().trim();
             
@@ -107,7 +107,7 @@ public class RepositoryManagerDialog {
                 adapter.notifyDataSetChanged();
             }
         });
-        builder.setNegativeButton("Cancel", null);
+        builder.setNegativeButton(R.string.cancel, null);
         builder.show();
     }
 
@@ -120,12 +120,17 @@ public class RepositoryManagerDialog {
         return new DriverRepo("StevenMXZ Turnip Drivers", "https://api.github.com/repos/StevenMXZ/freedreno_turnip-CI/releases");
     }
 
+    public static DriverRepo getBannerTurnipRepo() {
+        return new DriverRepo("Banner Turnip 26.3 Nightlies", "https://api.github.com/repos/The412Banner/Banners-Turnip/releases");
+    }
+
     public static List<DriverRepo> loadDriverRepos(Context context, int limit) {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
         String jsonStr = prefs.getString("custom_driver_repos", "");
         ArrayList<DriverRepo> result = new ArrayList<>();
         if (jsonStr.isEmpty()) {
             result.add(getStevenMxzRepo());
+            result.add(getBannerTurnipRepo());
             result.add(new DriverRepo("Whitebelyash Drivers", "https://api.github.com/repos/whitebelyash/AdrenoToolsDrivers/releases"));
             result.add(new DriverRepo("Weab-Chan Turnip Drivers", "https://api.github.com/repos/Weab-chan/freedreno_turnip-CI/releases"));
         } else {
@@ -189,13 +194,13 @@ public class RepositoryManagerDialog {
             
             holder.actionButton.setOnClickListener(v -> {
                 PopupMenu popup = new PopupMenu(context, holder.actionButton);
-                popup.getMenu().add("Edit");
-                popup.getMenu().add("Delete");
+                popup.getMenu().add(0, 1, 0, R.string.edit);
+                popup.getMenu().add(0, 2, 1, R.string.remove);
                 
                 popup.setOnMenuItemClickListener(item -> {
-                    if (item.getTitle().equals("Edit")) {
+                    if (item.getItemId() == 1) {
                         showRepoDialog(repo, position);
-                    } else if (item.getTitle().equals("Delete")) {
+                    } else if (item.getItemId() == 2) {
                         repos.remove(position);
                         saveRepos();
                         notifyDataSetChanged();
