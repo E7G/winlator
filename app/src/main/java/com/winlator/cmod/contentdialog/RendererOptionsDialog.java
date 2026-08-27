@@ -63,6 +63,8 @@ public class RendererOptionsDialog extends ContentDialog {
         Spinner  spDriver  = findViewById(R.id.SPRendererDriver);
         Spinner  spFilter  = findViewById(R.id.SPRendererFilter);
         CheckBox cbSwapRB  = findViewById(R.id.CBRendererSwapRB);
+        CheckBox cbNativeAHB = findViewById(R.id.CBRendererNativeAHB);
+        cbNativeAHB.setChecked(config.getRendererNative());
 
         // Keep driver and filter controls available in both Vulkan and native modes.
         setGroupVisibility(R.id.GroupDriver,  View.VISIBLE);
@@ -101,6 +103,7 @@ public class RendererOptionsDialog extends ContentDialog {
 
         // Save on confirm
         setOnConfirmCallback(() -> {
+            config.setRendererNative(cbNativeAHB.isChecked());
             config.setRendererPresentMode(PRESENT_MODE_IDS[spPresent.getSelectedItemPosition()]);
             config.setRendererDriverId(driverIds.get(spDriver.getSelectedItemPosition()));
             config.setRendererFilterMode(spFilter.getSelectedItemPosition());
