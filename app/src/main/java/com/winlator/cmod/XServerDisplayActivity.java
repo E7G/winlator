@@ -1064,12 +1064,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         environment = new XEnvironment(this, imageFs);
+
+        final boolean nativeRenderingEnabled = shortcut != null
+                ? shortcut.getRendererNative()
+                : (container != null && container.isRendererNative());
+        final boolean endToEndDirectAHB = nativeRenderingEnabled
+                && preferences.getBoolean("direct_ahb_compositor", false);
+        guestProgramLauncherComponent.setDirectAHB(endToEndDirectAHB);
+
         environment.addComponent(
                 new SysVSharedMemoryComponent(
                         xServer,
                         UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.SYSVSHM_SERVER_PATH)));
 
-        if (preferences.getBoolean("direct_ahb_compositor", false)) {
+        if (endToEndDirectAHB) {
             DirectCompositorComponent directCompositor = new DirectCompositorComponent(
                     xServerView.getRenderer(), 4,
                     xServer.screenInfo.width, xServer.screenInfo.height,
