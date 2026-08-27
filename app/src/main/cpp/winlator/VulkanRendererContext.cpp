@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <inttypes.h>
 #include <dlfcn.h>
+#include <unistd.h>
 #include "window_vert.h"
 #include "window_frag.h"
 #include "window_sgsr_frag.h"
