@@ -307,6 +307,9 @@ public class SettingsFragment extends Fragment {
         final CheckBox cbHighRefreshRate = view.findViewById(R.id.CBHighRefreshRate);
         cbHighRefreshRate.setChecked(preferences.getBoolean("high_refresh_rate_mode", false));
 
+        final CheckBox cbDirectAHBCompositor = view.findViewById(R.id.CBDirectAHBCompositor);
+        cbDirectAHBCompositor.setChecked(preferences.getBoolean("direct_ahb_compositor", false));
+
         final CheckBox cbRootExtremePerformance = view.findViewById(R.id.CBRootExtremePerformance);
         cbRootExtremePerformance.setChecked(preferences.getBoolean("root_extreme_performance_mode", false));
 
@@ -339,6 +342,7 @@ public class SettingsFragment extends Fragment {
             editor.putBoolean("share_android_clipboard", cbShareClipboard.isChecked());
             editor.putBoolean("pause_resume_wine", cbPauseWine.isChecked());
             editor.putBoolean("high_refresh_rate_mode", cbHighRefreshRate.isChecked());
+            editor.putBoolean("direct_ahb_compositor", cbDirectAHBCompositor.isChecked());
             editor.putBoolean("root_extreme_performance_mode", cbRootExtremePerformance.isChecked());
             editor.putBoolean("remove_loading_bar_when_booting_games", cbRemoveLoadingBarWhenBootingGames.isChecked());
 
