@@ -108,6 +108,9 @@ struct VkTable {
 #include <mutex>
 #include <shared_mutex>
 #include <condition_variable>
+#include <memory>
+
+class DirectAHBCompositor;
 
 static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -145,6 +148,11 @@ public:
 
     void detachSurface();
     bool reattachSurface(ANativeWindow* newWindow);
+
+    bool startDirectAHBReceiver(int socketFd, AHardwareBuffer* const* buffers, int count,
+                                int logicalW, int logicalH, float refreshRate);
+    void stopDirectAHBReceiver();
+    bool isDirectAHBPresenting() const;
 
     bool verboseLog = true;
     void setVerboseLog(bool v) { verboseLog = v; }
@@ -208,6 +216,7 @@ private:
     };
 
     ANativeWindow* window;
+    std::unique_ptr<DirectAHBCompositor> directAHB;
     int surfaceWidth, surfaceHeight, containerWidth, containerHeight;
     void* adrenotoolsHandle = nullptr;
     int filterMode  = 0;
