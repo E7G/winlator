@@ -60,6 +60,7 @@ jobs:
         env:
           PROTON_ID: proton-11.0-2-arm64ec
           PROTON_WCP_URL: https://github.com/The412Banner/proton-wine/releases/download/build-p11-20260821/proton-11.0-2-arm64ec-sdk28.wcp
+          PROTON_WCP_SHA256: 23ae9d8ff61b4a3fc619bffc3e6ba810e89cb33bb319af29f8e4320e59f3259d
         run: |
           set -euxo pipefail
           TMP="$(mktemp -d)"
@@ -70,7 +71,16 @@ jobs:
           mkdir -p "$EXTRACTED" "$PACKAGE"
 
           curl -fL --retry 5 --retry-delay 2 "$PROTON_WCP_URL" -o "$WCP"
-          tar --zstd -xf "$WCP" -C "$EXTRACTED"
+          echo "$PROTON_WCP_SHA256  $WCP" | sha256sum -c -
+
+          if tar --zstd -tf "$WCP" >/dev/null 2>&1; then
+            tar --zstd -xf "$WCP" -C "$EXTRACTED"
+          elif tar -Jtf "$WCP" >/dev/null 2>&1; then
+            tar -Jxf "$WCP" -C "$EXTRACTED"
+          else
+            echo "Unsupported Proton WCP compression" >&2
+            exit 1
+          fi
 
           PROFILE="$(find "$EXTRACTED" -name profile.json -type f -print -quit)"
           test -n "$PROFILE"
