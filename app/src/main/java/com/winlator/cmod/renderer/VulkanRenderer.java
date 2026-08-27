@@ -78,6 +78,11 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeDetachSurface(long handle);
     private native boolean nativeReattachSurface(long handle, Surface surface);
     private native int[] nativeGetSwapchainSize(long handle);
+    private native boolean nativeStartDirectAHB(long handle, int socketFd,
+        long b0, long b1, long b2, long b3, int count,
+        int logicalWidth, int logicalHeight, float refreshRate);
+    private native void nativeStopDirectAHB(long handle);
+    private native boolean nativeIsDirectAHBPresenting(long handle);
 
     @FastNative private native void nativeUpdateWindowContent(long handle, long id,
         java.nio.ByteBuffer pixels, short width, short height, short stride, int x, int y);
@@ -209,6 +214,26 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         }
     }
 
+    public boolean startDirectAHBReceiver(int socketFd, long b0, long b1, long b2, long b3,
+                                          int count, int logicalWidth, int logicalHeight,
+                                          float refreshRate) {
+        synchronized (lock) {
+            return nativeHandle != 0 && nativeStartDirectAHB(nativeHandle, socketFd,
+                    b0, b1, b2, b3, count, logicalWidth, logicalHeight, refreshRate);
+        }
+    }
+
+    public void stopDirectAHBReceiver() {
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeStopDirectAHB(nativeHandle);
+        }
+    }
+
+    public boolean isDirectAHBPresenting() {
+        synchronized (lock) {
+            return nativeHandle != 0 && nativeIsDirectAHBPresenting(nativeHandle);
+        }
+    }
 
 
     private void updateTransform() {
