@@ -185,6 +185,75 @@ bool DirectAHBCompositor::start(ANativeWindow* parentWindow, int fd,
     return true;
 }
 
+bool DirectAHBCompositor::startLocal(ANativeWindow* parentWindow,
+                                         int width, int height, float refreshRate) {
+    stop();
+    std::lock_guard<std::mutex> lk(mutex);
+    if (!createLayersLocked(parentWindow, refreshRate)) return false;
+    socketFd = -1;
+    buffers.clear();
+    logicalWidth = std::max(width, 1);
+    logicalHeight = std::max(height, 1);
+    currentSlot = -1;
+    paused = false;
+    dstX = dstY = 0;
+    dstW = logicalWidth;
+    dstH = logicalHeight;
+    running.store(true, std::memory_order_release);
+    DLOGI("local DRI3 direct-AHB mode started %dx%d", logicalWidth, logicalHeight);
+    return true;
+}
+
+bool DirectAHBCompositor::submitExternalBuffer(AHardwareBuffer* ahb, int acquireFenceFd,
+                                                int srcWidth, int srcHeight,
+                                                int outX, int outY, int outW, int outH) {
+    std::lock_guard<std::mutex> lk(mutex);
+    if (!running.load(std::memory_order_acquire) || paused || !gameControl || !ahb) {
+        if (acquireFenceFd >= 0) close(acquireFenceFd);
+        return false;
+    }
+
+    AHardwareBuffer_Desc desc{};
+    AHardwareBuffer_describe(ahb, &desc);
+    const int sw = srcWidth > 0 ? srcWidth : static_cast<int>(desc.width);
+    const int sh = srcHeight > 0 ? srcHeight : static_cast<int>(desc.height);
+    dstX = outX;
+    dstY = outY;
+    dstW = outW > 0 ? outW : logicalWidth;
+    dstH = outH > 0 ? outH : logicalHeight;
+
+    ARect src{0, 0, sw, sh};
+    ARect dst{dstX, dstY, dstX + dstW, dstY + dstH};
+
+    auto tc = reinterpret_cast<FnTransactionCreate>(fnTransactionCreate);
+    auto td = reinterpret_cast<FnTransactionDelete>(fnTransactionDelete);
+    auto ta = reinterpret_cast<FnTransactionApply>(fnTransactionApply);
+    auto sb = reinterpret_cast<FnSetBuffer>(fnSetBuffer);
+    auto sg = reinterpret_cast<FnSetGeometry>(fnSetGeometry);
+    auto sv = reinterpret_cast<FnSetVisibility>(fnSetVisibility);
+    void* t = tc();
+    if (!t) {
+        if (acquireFenceFd >= 0) close(acquireFenceFd);
+        return false;
+    }
+
+    // Ownership of acquireFenceFd is transferred to SurfaceFlinger.
+    sb(t, gameControl, ahb, acquireFenceFd);
+    sg(t, gameControl, &src, &dst, 0);
+    sv(t, gameControl, 1);
+    ta(t);
+    td(t);
+
+    presenting.store(true, std::memory_order_release);
+    applyCursorLocked();
+    return true;
+}
+
+void DirectAHBCompositor::hide() {
+    std::lock_guard<std::mutex> lk(mutex);
+    hideAndReleaseCurrentLocked();
+}
+
 void DirectAHBCompositor::stop() {
     running.store(false, std::memory_order_release);
     int fd = -1;
