@@ -674,4 +674,7 @@
 
     <string name="root_extreme_performance_mode">Root 极致性能模式</string>
     <string name="root_extreme_performance_summary">游戏运行期间临时拉满 CPU/GPU 频率并提高 Winlator 进程优先级；温控保护保持启用，退出后自动恢复。</string>
+
+    <string name="direct_ahb_compositor">Direct AHB 零拷贝合成（实验）</string>
+    <string name="direct_ahb_compositor_summary">DXVK/Wine 帧通过 AHardwareBuffer 直接交给 SurfaceFlinger；不可用时自动回退到 3.1 VulkanRenderer。</string>
 </resources>
