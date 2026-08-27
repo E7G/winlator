@@ -832,7 +832,7 @@ public class ShortcutSettingsDialog extends ContentDialog implements DXVKConfigD
         CONTENT_IO_EXECUTOR.execute(() -> {
             String contentsURL = PreferenceManager.getDefaultSharedPreferences(getContext())
                     .getString("downloadable_contents_url", ContentsManager.REMOTE_PROFILES);
-            String json = Downloader.downloadString(contentsURL);
+            String json = ContentsManager.downloadMergedRemoteProfiles(contentsURL);
             if (json != null) contentsManager.setRemoteProfiles(json);
             List<ContentProfile> candidates = new ArrayList<>();
             for (ContentProfile.ContentType type : types) {
