@@ -525,6 +525,22 @@
                             android:text="@string/high_refresh_rate" />
 
                         <CheckBox
+                            android:id="@+id/CBRootExtremePerformance"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="left|center"
+                            android:text="@string/root_extreme_performance_mode" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="32dp"
+                            android:paddingEnd="8dp"
+                            android:paddingBottom="6dp"
+                            android:text="@string/root_extreme_performance_summary"
+                            android:textSize="12sp" />
+
+                        <CheckBox
                             android:id="@+id/CBRemoveLoadingBarWhenBootingGames"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
