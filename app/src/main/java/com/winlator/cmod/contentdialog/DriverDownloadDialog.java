@@ -48,14 +48,14 @@ public class DriverDownloadDialog {
 
     public void show() {
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle("Available Drivers"); // English
+        builder.setTitle(R.string.available_drivers);
 
         recyclerView = new RecyclerView(context);
         recyclerView.setBackgroundColor(Color.BLACK);
         recyclerView.setLayoutManager(new LinearLayoutManager(context));
 
         builder.setView(recyclerView);
-        builder.setNegativeButton("Back", null); // English
+        builder.setNegativeButton(R.string.back, null);
 
         dialog = builder.create();
         dialog.show();
@@ -69,7 +69,7 @@ public class DriverDownloadDialog {
             String jsonStr = Downloader.downloadString(repoUrl);
             
             if (jsonStr == null) {
-                runOnUi(() -> Toast.makeText(context, "Connection failed!", Toast.LENGTH_SHORT).show());
+                runOnUi(() -> Toast.makeText(context, R.string.connection_failed, Toast.LENGTH_SHORT).show());
                 return;
             }
 
@@ -81,7 +81,7 @@ public class DriverDownloadDialog {
                     JSONObject releaseObj = array.getJSONObject(i);
                     
                     
-                    String rawName = releaseObj.optString("name", releaseObj.optString("tag_name", "Unknown Driver"));
+                    String rawName = releaseObj.optString("name", releaseObj.optString("tag_name", context.getString(R.string.unknown_driver)));
                     String cleanName = cleanDriverName(rawName);
                     
                     String description = releaseObj.optString("body", "");
@@ -95,7 +95,7 @@ public class DriverDownloadDialog {
                             String url = asset.getString("browser_download_url");
                             String filename = asset.optString("name", "driver.zip");
                             
-                            if (url.endsWith(".zip") || url.endsWith(".tzst")) {
+                            if (url.toLowerCase().endsWith(".zip")) {
                                 assets.add(new DriverAsset(filename, url));
                             }
                         }
@@ -139,7 +139,7 @@ public class DriverDownloadDialog {
             }
 
             new AlertDialog.Builder(context)
-                .setTitle("Select Variant")
+                .setTitle(R.string.select_variant)
                 .setItems(assetNames, (dialogInterface, which) -> {
                     startDownload(item.assets.get(which));
                 })
@@ -148,7 +148,7 @@ public class DriverDownloadDialog {
     }
 
     private void startDownload(DriverAsset asset) {
-        Toast.makeText(context, "Downloading " + asset.name + "...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(context, context.getString(R.string.downloading_driver, asset.name), Toast.LENGTH_SHORT).show();
         
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
@@ -162,15 +162,15 @@ public class DriverDownloadDialog {
                     runOnUi(() -> {
                         String installedName = adrenotoolsManager.installDriver(fileUri);
                         if (!installedName.isEmpty()) {
-                            Toast.makeText(context, "Installed: " + installedName, Toast.LENGTH_SHORT).show();
+                            Toast.makeText(context, context.getString(R.string.driver_installed, installedName), Toast.LENGTH_SHORT).show();
                             if (onDismissCallback != null) onDismissCallback.run();
                         } else {
-                            Toast.makeText(context, "Installation failed! Invalid ZIP.", Toast.LENGTH_LONG).show();
+                            Toast.makeText(context, R.string.driver_install_failed_invalid_zip, Toast.LENGTH_LONG).show();
                         }
                         tmpFile.delete();
                     });
                 } else {
-                    runOnUi(() -> Toast.makeText(context, "Download failed!", Toast.LENGTH_SHORT).show());
+                    runOnUi(() -> Toast.makeText(context, R.string.download_failed, Toast.LENGTH_SHORT).show());
                 }
             } catch (Exception e) {
                 e.printStackTrace();
@@ -180,7 +180,7 @@ public class DriverDownloadDialog {
 
     private void setupAdapter(List<ReleaseItem> releases) {
         if (releases.isEmpty()) {
-            Toast.makeText(context, "No drivers found.", Toast.LENGTH_LONG).show();
+            Toast.makeText(context, R.string.no_drivers_found, Toast.LENGTH_LONG).show();
             return;
         }
         recyclerView.setAdapter(new DriverAdapter(releases));
