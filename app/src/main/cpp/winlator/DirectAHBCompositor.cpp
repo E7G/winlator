@@ -351,6 +351,11 @@ bool DirectAHBCompositor::reallocateBuffersLocked(int width, int height, int cou
 
     if (!sendReallocAckAndBuffersLocked(fresh)) {
         for (AHardwareBuffer* p : fresh) AHardwareBuffer_release(p);
+        // The positive ACK may already be on the stream. Do not append ACK=0
+        // behind a partial handle sequence; terminate the connection so the
+        // guest's recvHandle fails deterministically and its Vulkan layer falls back.
+        running.store(false, std::memory_order_release);
+        if (socketFd >= 0) shutdown(socketFd, SHUT_RDWR);
         return false;
     }
 
@@ -503,12 +508,14 @@ void DirectAHBCompositor::receiverLoop() {
             const int height = msg.dstX;
             const int count = msg.dstY;
             if (!reallocateBuffersLocked(width, height, count)) {
-                ReleaseMsg ack{};
-                ack.type = MSG_REALLOC_ACK;
-                ack.slotIndex = 0;
-                ack.releaseFd = -1;
-                std::lock_guard<std::mutex> writeLock(*socketWriteMutex);
-                (void)send(socketFd, &ack, sizeof(ack), MSG_NOSIGNAL);
+                if (running.load(std::memory_order_acquire) && socketFd >= 0) {
+                    ReleaseMsg ack{};
+                    ack.type = MSG_REALLOC_ACK;
+                    ack.slotIndex = 0;
+                    ack.releaseFd = -1;
+                    std::lock_guard<std::mutex> writeLock(*socketWriteMutex);
+                    (void)send(socketFd, &ack, sizeof(ack), MSG_NOSIGNAL);
+                }
                 DLOGW("dynamic AHB pool realloc failed: %dx%d x %d", width, height, count);
             }
             continue;
