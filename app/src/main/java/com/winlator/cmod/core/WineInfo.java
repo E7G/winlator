@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
 
 public class WineInfo implements Parcelable {
     public static final WineInfo MAIN_WINE_VERSION = new WineInfo("proton", "11.0", "2", "arm64ec", null);
-    private static final Pattern pattern = Pattern.compile("^(wine|proton)\\-([0-9\\.]+)\\-?([0-9\\.]+)?\\-(x86|x86_64|arm64ec)$");
+    private static final Pattern pattern = Pattern.compile("^(wine|proton)\\-([0-9\\.]+)\\-?([0-9\\.]+)?\\-(x86|x86_64|arm64ec)(?:-.*)?$");
     public final String version;
     public final String type;
     public String subversion;
@@ -128,8 +128,16 @@ public class WineInfo implements Parcelable {
         ContentProfile wineProfile = contentsManager.getProfileByEntryName(identifier);
 
         if (wineProfile != null && (wineProfile.type == ContentProfile.ContentType.CONTENT_TYPE_WINE || wineProfile.type == ContentProfile.ContentType.CONTENT_TYPE_PROTON)) {
-            identifier = identifier.substring(0, identifier.length() - 2).toLowerCase();
+            int versionCodeSeparator = identifier.lastIndexOf('-');
+            if (versionCodeSeparator > 0)
+                identifier = identifier.substring(0, versionCodeSeparator).toLowerCase();
         }
+
+        // Community GE ARM64EC profiles use "ge-proton-..." while the runtime
+        // semantics are still Proton. Normalize the label but preserve the
+        // profile install directory selected above.
+        if (identifier.startsWith("ge-proton-"))
+            identifier = "proton-" + identifier.substring("ge-proton-".length());
 
         Matcher matcher = pattern.matcher(identifier);
 
