@@ -671,4 +671,7 @@
     <string name="install">安装</string>
     <string name="select">选择</string>
     <string name="wine_version_locked_for_existing_container">已有容器的 Wine 版本已锁定</string>
+
+    <string name="root_extreme_performance_mode">Root 极致性能模式</string>
+    <string name="root_extreme_performance_summary">游戏运行期间临时拉满 CPU/GPU 频率并提高 Winlator 进程优先级；温控保护保持启用，退出后自动恢复。</string>
 </resources>
