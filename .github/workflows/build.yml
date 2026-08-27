@@ -6,6 +6,7 @@ on:
       - main
       - integration/ludashi-3.1-plus
       - feature/dac-ahb-root-perf
+      - feature/end-to-end-dxvk-ahb-proton11
   pull_request:
     branches:
       - main
