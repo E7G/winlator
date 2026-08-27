@@ -148,6 +148,17 @@ public class XConnectorEpoll implements Runnable {
         connectedClients.remove(client.clientSocket.fd);
     }
 
+    /**
+     * Transfers ownership of a client fd to a native receiver thread without
+     * closing it. Used by Direct AHB compositing so Java epoll cannot steal
+     * bytes from the fixed-size presentation protocol.
+     */
+    public void detachClientFromEpoll(Client client) {
+        if (client == null) return;
+        if (!multithreadedClients) removeFdFromEpoll(epollFd, client.clientSocket.fd);
+        connectedClients.remove(client.clientSocket.fd);
+    }
+
     private void shutdown() {
         while (connectedClients.size() > 0) {
             Client client = connectedClients.valueAt(connectedClients.size()-1);
