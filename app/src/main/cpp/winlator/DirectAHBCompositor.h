@@ -24,6 +24,12 @@ public:
     bool start(ANativeWindow* parentWindow, int socketFd,
                AHardwareBuffer* const* buffers, int bufferCount,
                int logicalWidth, int logicalHeight, float refreshRate);
+    bool startLocal(ANativeWindow* parentWindow, int logicalWidth, int logicalHeight,
+                    float refreshRate);
+    bool submitExternalBuffer(AHardwareBuffer* ahb, int acquireFenceFd,
+                              int srcWidth, int srcHeight,
+                              int dstX, int dstY, int dstWidth, int dstHeight);
+    void hide();
     void stop();
 
     void detachSurface();
