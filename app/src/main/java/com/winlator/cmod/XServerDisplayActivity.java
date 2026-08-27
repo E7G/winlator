@@ -106,7 +106,9 @@ import com.winlator.cmod.winhandler.WinHandler;
 import com.winlator.cmod.xconnector.UnixSocketConfig;
 import com.winlator.cmod.xenvironment.ImageFs;
 import com.winlator.cmod.xenvironment.XEnvironment;
+import com.winlator.cmod.xenvironment.components.AHBSocketServerComponent;
 import com.winlator.cmod.xenvironment.components.ALSAServerComponent;
+import com.winlator.cmod.xenvironment.components.DirectCompositorComponent;
 import com.winlator.cmod.xenvironment.components.GuestProgramLauncherComponent;
 import com.winlator.cmod.xenvironment.components.PulseAudioComponent;
 import com.winlator.cmod.xenvironment.components.SysVSharedMemoryComponent;
@@ -1066,6 +1068,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 new SysVSharedMemoryComponent(
                         xServer,
                         UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.SYSVSHM_SERVER_PATH)));
+
+        if (preferences.getBoolean("direct_ahb_compositor", false)) {
+            DirectCompositorComponent directCompositor = new DirectCompositorComponent(
+                    xServerView.getRenderer(), 4,
+                    xServer.screenInfo.width, xServer.screenInfo.height,
+                    pickHighestRefreshRate());
+            environment.addComponent(directCompositor);
+            environment.addComponent(new AHBSocketServerComponent(
+                    UnixSocketConfig.createSocket(rootPath, AHBSocketServerComponent.AHB_SOCKET_PATH),
+                    directCompositor));
+        }
+
         environment.addComponent(
                 new XServerComponent(
                         xServer,
