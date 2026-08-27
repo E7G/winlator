@@ -187,19 +187,34 @@ public class AdrenotoolsManager {
     
     public String installDriver(Uri driverUri) {
         File tmpDir = new File(adrenotoolsContentDir, "tmp");
-        if (tmpDir.exists()) tmpDir.delete();
-        tmpDir.mkdirs();
+        if (tmpDir.exists()) FileUtils.delete(tmpDir);
+        if (!tmpDir.mkdirs() && !tmpDir.isDirectory()) return "";
         ZipInputStream zis;
         InputStream is;
         String name = "";
         
         try {
             is = mContext.getContentResolver().openInputStream(driverUri);
+            if (is == null) throw new IOException("Unable to open driver archive");
             zis = new ZipInputStream(is);
+            String tmpRoot = tmpDir.getCanonicalPath() + File.separator;
             ZipEntry entry = zis.getNextEntry();
             while (entry != null) {
                 File dstFile = new File(tmpDir, entry.getName());
-                Files.copy(zis, dstFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                String dstPath = dstFile.getCanonicalPath();
+                if (!dstPath.startsWith(tmpRoot))
+                    throw new IOException("Blocked unsafe ZIP entry: " + entry.getName());
+
+                if (entry.isDirectory()) {
+                    if (!dstFile.mkdirs() && !dstFile.isDirectory())
+                        throw new IOException("Unable to create directory: " + dstFile);
+                } else {
+                    File parent = dstFile.getParentFile();
+                    if (parent != null && !parent.mkdirs() && !parent.isDirectory())
+                        throw new IOException("Unable to create directory: " + parent);
+                    Files.copy(zis, dstFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                }
+                zis.closeEntry();
                 entry = zis.getNextEntry();
             }
             zis.close();
