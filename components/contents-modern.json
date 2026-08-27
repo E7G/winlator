@@ -1,0 +1,56 @@
+[
+  {
+    "type": "Box64",
+    "verName": "Box64-0.4.4-Bionic",
+    "verCode": 0,
+    "remoteUrl": "https://github.com/The412Banner/Nightlies/releases/download/Box64-Bionic/Box64-0.4.4-Bionic.wcp"
+  },
+  {
+    "type": "WOWBox64",
+    "verName": "WOWBox64-0.4.4",
+    "verCode": 0,
+    "remoteUrl": "https://github.com/The412Banner/Nightlies/releases/download/Wowbox64/WOWBox64-0.4.4.wcp"
+  },
+  {
+    "type": "FEXCore",
+    "verName": "FEXCore-2608-stable",
+    "verCode": 0,
+    "remoteUrl": "https://github.com/The412Banner/winlator-contents/releases/download/fexcore-v1/FEXCore-2608-stable.wcp"
+  },
+  {
+    "type": "DXVK",
+    "verName": "dxvk-3.0.2",
+    "verCode": 0,
+    "remoteUrl": "https://github.com/The412Banner/Nightlies/releases/download/Dxvk/dxvk-3.0.2.wcp"
+  },
+  {
+    "type": "DXVK",
+    "verName": "dxvk-arm64ec-3.0.2",
+    "verCode": 0,
+    "remoteUrl": "https://github.com/The412Banner/Nightlies/releases/download/Dxvk-arm64ec/dxvk-arm64ec-3.0.2.wcp"
+  },
+  {
+    "type": "DXVK",
+    "verName": "dxvk-gplasync-3.0.2-1",
+    "verCode": 0,
+    "remoteUrl": "https://github.com/The412Banner/Nightlies/releases/download/Dxvk-gplasync/dxvk-gplasync-3.0.2-1.wcp"
+  },
+  {
+    "type": "DXVK",
+    "verName": "dxvk-gplasync-arm64ec-3.0.2-1",
+    "verCode": 0,
+    "remoteUrl": "https://github.com/The412Banner/Nightlies/releases/download/Dxvk-gplasync-arm64ec/dxvk-gplasync-arm64ec-3.0.2-1.wcp"
+  },
+  {
+    "type": "VKD3D",
+    "verName": "vkd3d-proton-3.0.1",
+    "verCode": 0,
+    "remoteUrl": "https://github.com/The412Banner/Nightlies/releases/download/Vkd3d-proton/vkd3d-proton-3.0.1.wcp"
+  },
+  {
+    "type": "VKD3D",
+    "verName": "vkd3d-proton-arm64ec-3.0.1",
+    "verCode": 0,
+    "remoteUrl": "https://github.com/The412Banner/Nightlies/releases/download/VKD3D-PROTON-ARM/vkd3d-proton-arm64ec-3.0.1.wcp"
+  }
+]
