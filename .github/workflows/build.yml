@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - integration/ludashi-3.1-plus
+      - feature/dac-ahb-root-perf
   pull_request:
     branches:
       - main
