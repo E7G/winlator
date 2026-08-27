@@ -227,6 +227,30 @@ Java_com_winlator_cmod_renderer_VulkanRenderer_nativeStartDirectAHB(
             ? JNI_TRUE : JNI_FALSE;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_winlator_cmod_renderer_VulkanRenderer_nativeSubmitDirectAHB(
+    JNIEnv*, jobject, jlong handle, jlong ahbPtr, jint acquireFenceFd,
+    jint srcW, jint srcH, jint dstX, jint dstY, jint dstW, jint dstH,
+    jfloat refreshRate)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r || !ahbPtr) {
+        if (acquireFenceFd >= 0) close(acquireFenceFd);
+        return JNI_FALSE;
+    }
+    return r->submitDirectAHBFrame(reinterpret_cast<AHardwareBuffer*>(ahbPtr),
+            acquireFenceFd, srcW, srcH, dstX, dstY, dstW, dstH, refreshRate)
+            ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_renderer_VulkanRenderer_nativeHideDirectAHB(
+    JNIEnv*, jobject, jlong handle)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->hideDirectAHB();
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_cmod_renderer_VulkanRenderer_nativeStopDirectAHB(
     JNIEnv*, jobject, jlong handle)
