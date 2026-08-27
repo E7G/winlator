@@ -83,7 +83,7 @@ public class ContentsFragment extends Fragment {
 
         new Thread(() -> {
             String contentsURL = sp.getString("downloadable_contents_url", ContentsManager.REMOTE_PROFILES);
-            String json = Downloader.downloadString(contentsURL);
+            String json = ContentsManager.downloadMergedRemoteProfiles(contentsURL);
             if (json == null)
                 return;
             getActivity().runOnUiThread(() -> {
