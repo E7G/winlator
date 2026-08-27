@@ -677,4 +677,6 @@
 
     <string name="direct_ahb_compositor">Direct AHB 零拷贝合成（实验）</string>
     <string name="direct_ahb_compositor_summary">DXVK/Wine 帧通过 AHardwareBuffer 直接交给 SurfaceFlinger；不可用时自动回退到 3.1 VulkanRenderer。</string>
+    <string name="native_rendering_plus">Native Rendering+（AHB 直出）</string>
+    <string name="native_rendering_plus_summary">符合条件的 DRI3 AHardwareBuffer 帧直接交给 SurfaceFlinger 显示；不兼容场景会自动回退 Vulkan。</string>
 </resources>
