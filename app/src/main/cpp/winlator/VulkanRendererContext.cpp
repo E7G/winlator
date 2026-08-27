@@ -1201,6 +1201,33 @@ bool VulkanRendererContext::startDirectAHBReceiver(int fd, AHardwareBuffer* cons
     return ok;
 }
 
+bool VulkanRendererContext::submitDirectAHBFrame(AHardwareBuffer* ahb, int acquireFenceFd,
+                                                     int srcW, int srcH,
+                                                     int dstX, int dstY, int dstW, int dstH,
+                                                     float refreshRate) {
+    if (!ahb || !window || surfaceDetached.load(std::memory_order_acquire)) {
+        if (acquireFenceFd >= 0) close(acquireFenceFd);
+        return false;
+    }
+    if (!directAHB) directAHB = std::make_unique<DirectAHBCompositor>();
+    if (!directAHB->isRunning()) {
+        if (!directAHB->startLocal(window, containerWidth, containerHeight, refreshRate)) {
+            if (acquireFenceFd >= 0) close(acquireFenceFd);
+            return false;
+        }
+        if (!cursorPixels.empty())
+            directAHB->updateCursorImage(cursorPixels.data(), cursorTexW, cursorTexH, cursorHotX, cursorHotY);
+        directAHB->updatePointerPosition((short)pointerX.load(), (short)pointerY.load());
+        directAHB->setCursorVisible(cursorVisible.load());
+    }
+    return directAHB->submitExternalBuffer(ahb, acquireFenceFd, srcW, srcH,
+                                           dstX, dstY, dstW, dstH);
+}
+
+void VulkanRendererContext::hideDirectAHB() {
+    if (directAHB && directAHB->isRunning()) directAHB->hide();
+}
+
 void VulkanRendererContext::stopDirectAHBReceiver() {
     if (directAHB) directAHB->stop();
     needsRender.store(true, std::memory_order_release);
