@@ -15,6 +15,21 @@
             android:orientation="vertical"
             android:padding="12dp">
 
+            <CheckBox
+                android:id="@+id/CBRendererNativeAHB"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/native_rendering_plus" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingStart="32dp"
+                android:paddingEnd="4dp"
+                android:paddingBottom="10dp"
+                android:text="@string/native_rendering_plus_summary"
+                android:textSize="12sp" />
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

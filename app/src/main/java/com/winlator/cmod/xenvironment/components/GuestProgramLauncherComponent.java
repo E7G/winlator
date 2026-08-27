@@ -265,6 +265,8 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         boolean enableBox64Logs = preferences.getBoolean("enable_box64_logs", false);
         boolean openWithAndroidBrowser = preferences.getBoolean("open_with_android_browser", false);
         boolean shareAndroidClipboard = preferences.getBoolean("share_android_clipboard", false);
+        boolean directAHB = preferences.getBoolean("direct_ahb_compositor", false);
+        boolean rootExtremePerformance = preferences.getBoolean("root_extreme_performance_mode", false);
 
         if (openWithAndroidBrowser)
             this.envVars.put("WINE_OPEN_WITH_ANDROID_BROWSER", "1");
@@ -344,6 +346,26 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         String nativeLibDir = environment.getContext().getApplicationInfo().nativeLibraryDir;
         File fakeinputSrc = new File(nativeLibDir, "libfakeinput.so");
 
+        // Deploy the optional Direct AHB Vulkan layer into the guest image.
+        // The manifest stays disabled unless directAHB is enabled below.
+        try {
+            File ahbLayerSrc = new File(nativeLibDir, "libahb_layer.so");
+            File ahbLayerDest = new File(imageFs.getLibDir(), "libahb_layer.so");
+            File implicitLayerDir = new File(rootDir, "usr/share/vulkan/implicit_layer.d");
+            if (!implicitLayerDir.exists()) implicitLayerDir.mkdirs();
+            File ahbManifestDest = new File(implicitLayerDir, "ahb_layer.json");
+
+            if (ahbLayerSrc.exists() &&
+                    (!ahbLayerDest.exists() || ahbLayerDest.length() != ahbLayerSrc.length())) {
+                FileUtils.copy(ahbLayerSrc, ahbLayerDest);
+            }
+            try (InputStream in = environment.getContext().getAssets().open("ahb_layer.json")) {
+                Files.copy(in, ahbManifestDest.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (Exception e) {
+            Log.w("GuestLauncher", "Direct AHB layer deployment unavailable; Vulkan fallback will remain", e);
+        }
+
         Log.d("GuestLauncher", "nativeLibDir: " + nativeLibDir);
         Log.d("GuestLauncher", "fakeinputSrc exists: " + fakeinputSrc.exists());
         Log.d("GuestLauncher", "fakeinputDest: " + fakeinputDest.getAbsolutePath());
@@ -404,6 +426,27 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         
         if (this.envVars != null) {
             execEnvVars.putAll(this.envVars);
+        }
+
+        // Apply DAC policy AFTER custom env vars so the UI toggle is authoritative.
+        if (directAHB) {
+            execEnvVars.remove("DISABLE_AHB_LAYER");
+            execEnvVars.put("ENABLE_AHB_LAYER", "1");
+            execEnvVars.put("ANDROID_AHB_SERVER", rootDir.getPath() + AHBSocketServerComponent.AHB_SOCKET_PATH);
+            execEnvVars.put("VK_INSTANCE_LAYERS", "VK_LAYER_WINLATOR_ahb_direct");
+            execEnvVars.put("VK_LAYER_PATH",
+                    rootDir.getPath() + "/usr/share/vulkan/implicit_layer.d:" +
+                    rootDir.getPath() + "/usr/share/vulkan/explicit_layer.d");
+            // Stable 3.1 path: GPU-normalized RGBA AHB. No CPU copy.
+            execEnvVars.put("WINLATOR_AHB_DIRECT_RENDER", "0");
+            execEnvVars.put("WINLATOR_AHB_NO_PACING", rootExtremePerformance ? "1" : "0");
+        } else {
+            execEnvVars.put("DISABLE_AHB_LAYER", "1");
+            execEnvVars.remove("ENABLE_AHB_LAYER");
+            execEnvVars.remove("ANDROID_AHB_SERVER");
+            execEnvVars.remove("VK_INSTANCE_LAYERS");
+            execEnvVars.remove("WINLATOR_AHB_DIRECT_RENDER");
+            execEnvVars.remove("WINLATOR_AHB_NO_PACING");
         }
 
         String emulator = container.getEmulator();

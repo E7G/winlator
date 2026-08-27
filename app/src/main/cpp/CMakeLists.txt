@@ -18,6 +18,7 @@ add_library(winlator SHARED
         xr/renderer.c
         winlator/drawable.c
         winlator/gpu_image.c
+        winlator/ahb_bridge.c
         winlator/sysvshared_memory.c
         winlator/xconnector_epoll.c
         winlator/alsa_client.c
@@ -99,6 +100,7 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR})
 add_library(vulkan_renderer SHARED
         winlator/vulkan_jni.cpp
         winlator/VulkanRendererContext.cpp
+        winlator/DirectAHBCompositor.cpp
 
         ${CMAKE_CURRENT_BINARY_DIR}/window_vert.h
         ${CMAKE_CURRENT_BINARY_DIR}/window_frag.h

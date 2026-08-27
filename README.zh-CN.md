@@ -2,6 +2,15 @@
 
 这是基于 **Winlator Ludashi 3.1** 的可维护整合分支，目标是保留 3.1 的新渲染/输入/存储修复，同时吸收 Ludashi Plus 中仍然适用于 3.1 的优化思路，并提供中文界面、可复现构建和自动 Release。
 
+
+## 3.1-E7G.3 极致性能增强
+
+- **Native Rendering+（AHB 直出）**：符合条件的 DRI3 AHardwareBuffer 帧直接提交给 SurfaceFlinger，绕过 Winlator Vulkan 合成与 swapchain present；不兼容场景自动回退原 VulkanRenderer。
+- **Root 极致性能模式**：可选地在游戏会话期间提高 CPU/GPU 频率策略和 Winlator/Wine 进程调度优先级，退出后恢复；不会主动关闭温控、SELinux 或充电保护。
+- Native Rendering+ 支持独立光标层，Android 10 / API 29+ 可启用直出路径。
+
+详细启用方法、回退条件和调试说明见 [极致性能模式与 Native Rendering+](docs/PERFORMANCE.zh-CN.md)。
+
 ## 分支
 
 - `main`：稳定发布线（通过 CI 后再更新）。

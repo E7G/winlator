@@ -1,5 +1,6 @@
 #include <android/log.h>
 #include <android/hardware_buffer.h>
+#include <android/hardware_buffer_jni.h>
 #include <jni.h>
 
 static jmethodID g_setStride = NULL;
@@ -21,6 +22,14 @@ Java_com_winlator_cmod_renderer_GPUImage_hardwareBufferFromSocket(JNIEnv *env, j
         return 0;
     }
     return (jlong)ahb;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_winlator_cmod_renderer_GPUImage_hardwareBufferToJava(JNIEnv *env, jobject obj, jlong ptr) {
+    (void)obj;
+    AHardwareBuffer *ahb = (AHardwareBuffer *)ptr;
+    if (!ahb) return NULL;
+    return AHardwareBuffer_toHardwareBuffer(env, ahb);
 }
 
 JNIEXPORT jlong JNICALL

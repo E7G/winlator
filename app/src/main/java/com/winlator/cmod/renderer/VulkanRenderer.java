@@ -50,6 +50,11 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private String nativeLibDir = null;
     private Drawable rootCursorDrawable;
     private Cursor lastCursor = null;
+    private volatile boolean directAHBEnabled = false;
+    private volatile boolean directAHBActive = false;
+    private volatile int directAHBWindowId = -1;
+    private float directAHBRefreshRate = 0.0f;
+    private long directAHBFrameCount = 0;
 
     private volatile ArrayList<RenderableWindow> renderableWindows = new ArrayList<>();
 
@@ -78,6 +83,15 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeDetachSurface(long handle);
     private native boolean nativeReattachSurface(long handle, Surface surface);
     private native int[] nativeGetSwapchainSize(long handle);
+    private native boolean nativeStartDirectAHB(long handle, int socketFd,
+        long b0, long b1, long b2, long b3, int count,
+        int logicalWidth, int logicalHeight, float refreshRate);
+    private native void nativeStopDirectAHB(long handle);
+    private native boolean nativeIsDirectAHBPresenting(long handle);
+    private native boolean nativeSubmitDirectAHB(long handle, long ahbPtr, int acquireFenceFd,
+        int srcWidth, int srcHeight, int dstX, int dstY, int dstWidth, int dstHeight,
+        float refreshRate);
+    private native void nativeHideDirectAHB(long handle);
 
     @FastNative private native void nativeUpdateWindowContent(long handle, long id,
         java.nio.ByteBuffer pixels, short width, short height, short stride, int x, int y);
@@ -209,6 +223,115 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         }
     }
 
+    public boolean startDirectAHBReceiver(int socketFd, long b0, long b1, long b2, long b3,
+                                          int count, int logicalWidth, int logicalHeight,
+                                          float refreshRate) {
+        synchronized (lock) {
+            return nativeHandle != 0 && nativeStartDirectAHB(nativeHandle, socketFd,
+                    b0, b1, b2, b3, count, logicalWidth, logicalHeight, refreshRate);
+        }
+    }
+
+    public void stopDirectAHBReceiver() {
+        synchronized (lock) {
+            if (nativeHandle != 0) nativeStopDirectAHB(nativeHandle);
+        }
+    }
+
+    public boolean isDirectAHBPresenting() {
+        synchronized (lock) {
+            return nativeHandle != 0 && nativeIsDirectAHBPresenting(nativeHandle);
+        }
+    }
+
+
+    public void setDirectAHBEnabled(boolean enabled) {
+        directAHBEnabled = enabled;
+        if (!enabled) hideDirectAHB();
+    }
+
+    public boolean isDirectAHBEnabled() { return directAHBEnabled; }
+    public boolean isDirectAHBActive() { return directAHBActive; }
+    public long getDirectAHBFrameCount() { return directAHBFrameCount; }
+
+    private float getDirectAHBRefreshRate() {
+        if (directAHBRefreshRate > 1.0f) return directAHBRefreshRate;
+        float best = 60.0f;
+        try {
+            android.view.Display display = xServerView.getDisplay();
+            if (display != null) {
+                for (android.view.Display.Mode mode : display.getSupportedModes())
+                    best = Math.max(best, mode.getRefreshRate());
+            }
+        } catch (Throwable ignored) {}
+        directAHBRefreshRate = best;
+        return best;
+    }
+
+    private void hideDirectAHB() {
+        synchronized (lock) {
+            if (nativeHandle != 0 && directAHBActive)
+                nativeHideDirectAHB(nativeHandle);
+            directAHBActive = false;
+            directAHBWindowId = -1;
+        }
+    }
+
+    private boolean trySubmitDirectAHB(Window window, Drawable pixmap, short xOff, short yOff) {
+        if (!directAHBEnabled || android.os.Build.VERSION.SDK_INT < 29 ||
+                nativeHandle == 0 || pixmap == null || !pixmap.isDirectScanout() ||
+                !(pixmap.getTexture() instanceof GPUImage) ||
+                !window.attributes.isMapped() || inPipMode ||
+                magnifierZoom != 1.0f || screenOffsetYRelativeToCursor ||
+                pendingFilterMode != 0 || pendingStretchMode != 0 ||
+                pendingPostFXMode != 0 || pendingSwapRB ||
+                xOff != 0 || yOff != 0) {
+            if (directAHBActive) hideDirectAHB();
+            return false;
+        }
+
+        final int screenW = xServer.screenInfo.width;
+        final int screenH = xServer.screenInfo.height;
+        if (pixmap.width < screenW || pixmap.height < screenH ||
+                window.getRootX() != 0 || window.getRootY() != 0) {
+            if (directAHBActive) hideDirectAHB();
+            return false;
+        }
+
+        GPUImage image = (GPUImage) pixmap.getTexture();
+        long ahbPtr = image.getHardwareBufferPtr();
+        if (ahbPtr == 0) {
+            if (directAHBActive) hideDirectAHB();
+            return false;
+        }
+
+        final int dx, dy, dw, dh;
+        if (fullscreen) {
+            dx = 0; dy = 0;
+            dw = Math.max(1, surfaceWidth);
+            dh = Math.max(1, surfaceHeight);
+        } else {
+            viewTransformation.update(surfaceWidth, surfaceHeight, screenW, screenH);
+            dx = viewTransformation.viewOffsetX;
+            dy = viewTransformation.viewOffsetY;
+            dw = Math.max(1, viewTransformation.viewWidth);
+            dh = Math.max(1, viewTransformation.viewHeight);
+        }
+
+        boolean ok = nativeSubmitDirectAHB(nativeHandle, ahbPtr, -1,
+                pixmap.width, pixmap.height, dx, dy, dw, dh,
+                getDirectAHBRefreshRate());
+        if (ok) {
+            directAHBActive = true;
+            directAHBWindowId = window.id;
+            directAHBFrameCount++;
+            return true;
+        }
+
+        directAHBActive = false;
+        directAHBWindowId = -1;
+        return false;
+    }
 
 
     private void updateTransform() {
@@ -323,6 +446,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             if (classicHudRef != null) classicHudRef.update();
         }
         synchronized (lock) {
+            if (trySubmitDirectAHB(window, pixmap, xOff, yOff)) return;
             if (nativeHandle == 0 || pixmap == null) return;
             final int rx = window.getRootX() + xOff, ry = window.getRootY() + yOff;
             synchronized (pixmap.renderLock) {
@@ -355,6 +479,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     public void onUpdateWindowContent(Window window) {
         synchronized (lock) {
             if (nativeHandle == 0) return;
+            if (directAHBActive) hideDirectAHB();
             Drawable drawable = window.getContent();
             if (drawable == null || !window.attributes.isMapped()) return;
             if (unviewableWMClasses != null) {
@@ -403,6 +528,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
 
     @Override
     public void onDestroyWindow(Window window) {
+        if (directAHBActive && window.id == directAHBWindowId) hideDirectAHB();
         final long id = did(window.getContent());
         xServerView.queueEvent(() -> {
             synchronized (lock) {
@@ -416,6 +542,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
 
     @Override
     public void onUnmapWindow(Window window) {
+        if (directAHBActive && window.id == directAHBWindowId) hideDirectAHB();
         final long id = did(window.getContent());
         xServerView.queueEvent(() -> {
             synchronized (lock) {
@@ -469,11 +596,13 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
 
     public void setStretchMode(int mode) {
         pendingStretchMode = mode;
+        if (mode != 0 && directAHBActive) hideDirectAHB();
         synchronized (lock) { if (nativeHandle != 0) nativeSetStretchMode(nativeHandle, mode); }
     }
 
     public void setPostFXMode(int mode) {
         pendingPostFXMode = mode;
+        if (mode != 0 && directAHBActive) hideDirectAHB();
         synchronized (lock) { if (nativeHandle != 0) nativeSetPostFXMode(nativeHandle, mode); }
     }
 
@@ -484,11 +613,13 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
 
     public void setFilterMode(int mode) {
         pendingFilterMode = mode;
+        if (mode != 0 && directAHBActive) hideDirectAHB();
         synchronized (lock) { if (nativeHandle != 0) nativeSetFilterMode(nativeHandle, mode); }
     }
 
     public void setSwapRB(boolean enabled) {
         pendingSwapRB = enabled;
+        if (enabled && directAHBActive) hideDirectAHB();
         synchronized (lock) { if (nativeHandle != 0) nativeSetSwapRB(nativeHandle, enabled); }
     }
 
@@ -512,11 +643,13 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     }
     public void setScreenOffsetYRelativeToCursor(boolean b) {
         screenOffsetYRelativeToCursor = b;
+        if (b && directAHBActive) hideDirectAHB();
         synchronized (lock) { updateTransform(); }
     }
     public boolean isScreenOffsetYRelativeToCursor() { return screenOffsetYRelativeToCursor; }
     public void setMagnifierZoom(float zoom) {
         magnifierZoom = zoom;
+        if (zoom != 1.0f && directAHBActive) hideDirectAHB();
         synchronized (lock) { updateTransform(); }
     }
     public float getMagnifierZoom() { return magnifierZoom; }
@@ -541,7 +674,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     }
     public int getFpsLimit() { return fpsLimit; }
     public void setFpsLimit(int limit) { this.fpsLimit = limit; }
-    public void setPipMode(boolean pip) { inPipMode = pip; }
+    public void setPipMode(boolean pip) {
+        inPipMode = pip;
+        if (pip && directAHBActive) hideDirectAHB();
+    }
     public int getSurfaceWidth() { return surfaceWidth; }
     public int getSurfaceHeight() { return surfaceHeight; }
     public void requestRender() {}

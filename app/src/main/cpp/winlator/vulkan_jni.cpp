@@ -206,6 +206,67 @@ Java_com_winlator_cmod_renderer_VulkanRenderer_nativeGetSupportedPresentModes(JN
     return arr;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_winlator_cmod_renderer_VulkanRenderer_nativeStartDirectAHB(
+    JNIEnv*, jobject, jlong handle, jint socketFd,
+    jlong b0, jlong b1, jlong b2, jlong b3, jint count,
+    jint logicalW, jint logicalH, jfloat refreshRate)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r || socketFd < 0 || count < 3 || count > 4) return JNI_FALSE;
+    AHardwareBuffer* buffers[4] = {
+        reinterpret_cast<AHardwareBuffer*>(b0),
+        reinterpret_cast<AHardwareBuffer*>(b1),
+        reinterpret_cast<AHardwareBuffer*>(b2),
+        reinterpret_cast<AHardwareBuffer*>(b3)
+    };
+    for (int i = 0; i < count; ++i) {
+        if (!buffers[i]) return JNI_FALSE;
+    }
+    return r->startDirectAHBReceiver(socketFd, buffers, count, logicalW, logicalH, refreshRate)
+            ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_winlator_cmod_renderer_VulkanRenderer_nativeSubmitDirectAHB(
+    JNIEnv*, jobject, jlong handle, jlong ahbPtr, jint acquireFenceFd,
+    jint srcW, jint srcH, jint dstX, jint dstY, jint dstW, jint dstH,
+    jfloat refreshRate)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (!r || !ahbPtr) {
+        if (acquireFenceFd >= 0) close(acquireFenceFd);
+        return JNI_FALSE;
+    }
+    return r->submitDirectAHBFrame(reinterpret_cast<AHardwareBuffer*>(ahbPtr),
+            acquireFenceFd, srcW, srcH, dstX, dstY, dstW, dstH, refreshRate)
+            ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_renderer_VulkanRenderer_nativeHideDirectAHB(
+    JNIEnv*, jobject, jlong handle)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->hideDirectAHB();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_cmod_renderer_VulkanRenderer_nativeStopDirectAHB(
+    JNIEnv*, jobject, jlong handle)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->stopDirectAHBReceiver();
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_winlator_cmod_renderer_VulkanRenderer_nativeIsDirectAHBPresenting(
+    JNIEnv*, jobject, jlong handle)
+{
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    return (r && r->isDirectAHBPresenting()) ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT jintArray JNICALL
 Java_com_winlator_cmod_renderer_VulkanRenderer_nativeGetSwapchainSize(JNIEnv* env, jobject, jlong handle) {
     jintArray arr = env->NewIntArray(2);
