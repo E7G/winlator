@@ -1162,6 +1162,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         renderer.setSwapRB(shortcut != null ? shortcut.getRendererSwapRB()
                 : (container != null && container.getRendererSwapRB()));
 
+        renderer.setDirectAHBEnabled(shortcut != null ? shortcut.getRendererNative()
+                : (container != null && container.isRendererNative()));
+
         if (shortcut != null) {
             renderer.setUnviewableWMClasses("explorer.exe");
         }
