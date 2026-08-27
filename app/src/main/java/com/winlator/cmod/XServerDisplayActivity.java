@@ -269,8 +269,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         preloaderDialog = new PreloaderDialog(this);
         preferences = PreferenceManager.getDefaultSharedPreferences(this);
         rootExtremePerformance = preferences.getBoolean("root_extreme_performance_mode", false);
-        RootPerformanceManager.recoverStaleStateAsync();
         if (rootExtremePerformance) {
+            RootPerformanceManager.recoverStaleStateAsync();
             RootPerformanceManager.applyExtremeModeAsync(android.os.Process.myPid());
         }
 
