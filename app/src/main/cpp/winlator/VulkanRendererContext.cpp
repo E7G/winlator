@@ -1,6 +1,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 #include "VulkanRendererContext.h"
+#include "DirectAHBCompositor.h"
 #include <stdexcept>
 #include <cstdlib>
 #include <cstring>
@@ -17,6 +18,7 @@ VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
     : window(win), surfaceWidth(cW), surfaceHeight(cH), containerWidth(cW), containerHeight(cH),
       adrenotoolsHandle(aHandle)
 {
+    directAHB = std::make_unique<DirectAHBCompositor>();
     createInstance(); createSurface(); pickPhysicalDevice(); createLogicalDevice();
     createSwapchain(); createRenderPass(); createDSLayout();
     createPipeline(true, pipeline);
@@ -27,6 +29,7 @@ VulkanRendererContext::VulkanRendererContext(ANativeWindow* win, int cW, int cH,
 }
 
 VulkanRendererContext::~VulkanRendererContext() {
+    if (directAHB) directAHB->stop();
     isRunning = false; dirtyCV.notify_all();
     if (renderThread.joinable()) renderThread.join();
     std::lock_guard<std::mutex> lk(renderMutex);
@@ -986,6 +989,7 @@ void VulkanRendererContext::renderFrame() {
     std::shared_lock<std::shared_mutex> frameLock(frameMutex);
 
     needsRender.store(false,std::memory_order_relaxed);
+    if (directAHB && directAHB->isPresenting()) return;
     cursorMoved.store(false,std::memory_order_relaxed);
 
     if (surfaceDetached.load(std::memory_order_acquire)) return;
@@ -1122,6 +1126,7 @@ void VulkanRendererContext::onSurfaceResized(int w, int h) {
 }
 
 void VulkanRendererContext::detachSurface() {
+    if (directAHB) directAHB->detachSurface();
     surfaceDetached.store(true, std::memory_order_release);
     dirtyCV.notify_all();
 
@@ -1172,10 +1177,38 @@ bool VulkanRendererContext::reattachSurface(ANativeWindow* newWindow) {
 
         surfaceDetached.store(false, std::memory_order_release);
     }
+    if (directAHB && directAHB->isRunning()) {
+        directAHB->reattachSurface(window, 0.0f);
+    }
     needsRender.store(true, std::memory_order_release);
     dirtyCV.notify_all();
     __android_log_print(ANDROID_LOG_DEBUG, "Winlator_Renderer", "reattachSurface: OK");
     return true;
+}
+
+bool VulkanRendererContext::startDirectAHBReceiver(int fd, AHardwareBuffer* const* buffers, int count,
+                                                   int logicalW, int logicalH, float refreshRate) {
+    if (!directAHB) directAHB = std::make_unique<DirectAHBCompositor>();
+    if (!window || surfaceDetached.load(std::memory_order_acquire)) return false;
+    bool ok = directAHB->start(window, fd, buffers, count, logicalW, logicalH, refreshRate);
+    if (ok) {
+        if (!cursorPixels.empty()) {
+            directAHB->updateCursorImage(cursorPixels.data(), cursorTexW, cursorTexH, cursorHotX, cursorHotY);
+        }
+        directAHB->updatePointerPosition((short)pointerX.load(), (short)pointerY.load());
+        directAHB->setCursorVisible(cursorVisible.load());
+    }
+    return ok;
+}
+
+void VulkanRendererContext::stopDirectAHBReceiver() {
+    if (directAHB) directAHB->stop();
+    needsRender.store(true, std::memory_order_release);
+    dirtyCV.notify_all();
+}
+
+bool VulkanRendererContext::isDirectAHBPresenting() const {
+    return directAHB && directAHB->isPresenting();
 }
 
 void VulkanRendererContext::setTransform(float ox, float oy, float sx, float sy) {
@@ -1185,15 +1218,19 @@ void VulkanRendererContext::setTransform(float ox, float oy, float sx, float sy)
 
 void VulkanRendererContext::updatePointerPosition(short x, short y) {
     pointerX.store(x); pointerY.store(y);
+    if (directAHB && directAHB->isRunning()) directAHB->updatePointerPosition(x, y);
     if (cursorVisible.load()) { cursorMoved.store(true); dirtyCV.notify_one(); }
 }
 
 void VulkanRendererContext::setCursorVisible(bool v) {
-    cursorVisible.store(v); cursorMoved.store(true); dirtyCV.notify_one();
+    cursorVisible.store(v);
+    if (directAHB && directAHB->isRunning()) directAHB->setCursorVisible(v);
+    cursorMoved.store(true); dirtyCV.notify_one();
 }
 
 void VulkanRendererContext::updateCursorImage(void* px, short w, short h, short hotX, short hotY) {
     if (!px||w<=0||h<=0) return;
+    if (directAHB && directAHB->isRunning()) directAHB->updateCursorImage(px, w, h, hotX, hotY);
     std::lock_guard<std::mutex> lk(renderMutex);
     ensureCursorTex(w,h);
     cursorPixels.resize((size_t)w*h); memcpy(cursorPixels.data(),px,(size_t)w*h*4);
