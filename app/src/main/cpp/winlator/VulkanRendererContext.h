@@ -151,6 +151,11 @@ public:
 
     bool startDirectAHBReceiver(int socketFd, AHardwareBuffer* const* buffers, int count,
                                 int logicalW, int logicalH, float refreshRate);
+    bool submitDirectAHBFrame(AHardwareBuffer* ahb, int acquireFenceFd,
+                              int srcW, int srcH,
+                              int dstX, int dstY, int dstW, int dstH,
+                              float refreshRate);
+    void hideDirectAHB();
     void stopDirectAHBReceiver();
     bool isDirectAHBPresenting() const;
 
