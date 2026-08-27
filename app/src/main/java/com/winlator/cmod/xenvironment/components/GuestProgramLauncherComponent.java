@@ -58,6 +58,11 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private final ContentProfile wineProfile;
     private Container container;
     private final Shortcut shortcut;
+    private boolean directAHB = false;
+
+    public void setDirectAHB(boolean directAHB) {
+        this.directAHB = directAHB;
+    }
 
     public void setWineInfo(WineInfo wineInfo) {
         this.wineInfo = wineInfo;
@@ -265,7 +270,6 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         boolean enableBox64Logs = preferences.getBoolean("enable_box64_logs", false);
         boolean openWithAndroidBrowser = preferences.getBoolean("open_with_android_browser", false);
         boolean shareAndroidClipboard = preferences.getBoolean("share_android_clipboard", false);
-        boolean directAHB = preferences.getBoolean("direct_ahb_compositor", false);
         boolean rootExtremePerformance = preferences.getBoolean("root_extreme_performance_mode", false);
 
         if (openWithAndroidBrowser)
@@ -437,8 +441,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             execEnvVars.put("VK_LAYER_PATH",
                     rootDir.getPath() + "/usr/share/vulkan/implicit_layer.d:" +
                     rootDir.getPath() + "/usr/share/vulkan/explicit_layer.d");
-            // Stable 3.1 path: GPU-normalized RGBA AHB. No CPU copy.
-            execEnvVars.put("WINLATOR_AHB_DIRECT_RENDER", "0");
+            // End-to-end path: DXVK renders directly into BGRA AHB-backed swapchain images.
+            // If the Vulkan layer cannot import/replace the gameplay swapchain it passes
+            // through to normal DXVK WSI, while the renderer still keeps DRI3/Vulkan fallback.
+            execEnvVars.put("WINLATOR_AHB_DIRECT_RENDER", "1");
             execEnvVars.put("WINLATOR_AHB_NO_PACING", rootExtremePerformance ? "1" : "0");
         } else {
             execEnvVars.put("DISABLE_AHB_LAYER", "1");
