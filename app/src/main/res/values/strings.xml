@@ -662,4 +662,22 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="install">Install</string>
     <string name="select">Select</string>
     <string name="wine_version_locked_for_existing_container">Wine version is locked for existing containers</string>
+
+    <string name="driver_sources">Driver Sources</string>
+    <string name="available_drivers">Available Drivers</string>
+    <string name="add_source">Add Source</string>
+    <string name="close">Close</string>
+    <string name="back">Back</string>
+    <string name="add_repository">Add Repository</string>
+    <string name="edit_repository">Edit Repository</string>
+    <string name="driver_repo_name_hint">Name (e.g. Turnip Drivers)</string>
+    <string name="github_api_url_hint">GitHub API URL</string>
+    <string name="connection_failed">Connection failed</string>
+    <string name="unknown_driver">Unknown Driver</string>
+    <string name="select_variant">Select Variant</string>
+    <string name="downloading_driver">Downloading %1$s…</string>
+    <string name="driver_installed">Installed: %1$s</string>
+    <string name="driver_install_failed_invalid_zip">Installation failed: invalid driver ZIP</string>
+    <string name="download_failed">Download failed</string>
+    <string name="no_drivers_found">No drivers found</string>
 </resources>
