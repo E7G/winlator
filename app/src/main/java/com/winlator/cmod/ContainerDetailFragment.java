@@ -1778,7 +1778,7 @@ public class ContainerDetailFragment extends Fragment implements DXVKConfigDialo
         CONTENT_IO_EXECUTOR.execute(() -> {
             String contentsURL = PreferenceManager.getDefaultSharedPreferences(getContext())
                     .getString("downloadable_contents_url", ContentsManager.REMOTE_PROFILES);
-            String json = Downloader.downloadString(contentsURL);
+            String json = ContentsManager.downloadMergedRemoteProfiles(contentsURL);
             requireActivity().runOnUiThread(() -> dialog.setProgress(65));
             if (json != null) contentsManager.setRemoteProfiles(json);
             List<ContentProfile> candidates = new ArrayList<>();
