@@ -771,6 +771,35 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
          pCreateInfo->imageFormat, pCreateInfo->presentMode,
          pCreateInfo->minImageCount, (void*)(uintptr_t)pCreateInfo->oldSwapchain);
 
+    /*
+     * Dynamic pool resizing must not broaden the old "sniper hook" into a
+     * catch-all swapchain interceptor. DXVK and overlays can create tiny probe
+     * swapchains whose dimensions intentionally differ from the gameplay
+     * surface. Reallocating the Android AHB pool for those would evict a valid
+     * game pool and can produce black screens.
+     *
+     * Keep interception conservative. If a title uses a different format or a
+     * very small presentation surface it still has the DRI3-AHB and normal
+     * VulkanRenderer fallbacks.
+     */
+    const bool plausible_gameplay_swapchain =
+        pCreateInfo->imageArrayLayers == 1 &&
+        (pCreateInfo->imageUsage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) != 0 &&
+        pCreateInfo->imageExtent.width >= 320 &&
+        pCreateInfo->imageExtent.height >= 180 &&
+        pCreateInfo->imageExtent.width <= 8192 &&
+        pCreateInfo->imageExtent.height <= 8192 &&
+        pCreateInfo->imageFormat == VK_FORMAT_B8G8R8A8_UNORM;
+
+    if (!plausible_gameplay_swapchain) {
+        LOGI("layer_CreateSwapchainKHR: PASSTHROUGH non-gameplay candidate "
+             "(%ux%u fmt=%d layers=%u usage=0x%x)",
+             pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height,
+             pCreateInfo->imageFormat, pCreateInfo->imageArrayLayers,
+             pCreateInfo->imageUsage);
+        return g_dev_dispatch.CreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
+    }
+
     /* Handle oldSwapchain: if it's our AHB swapchain, destroy it first */
     if (pCreateInfo->oldSwapchain != VK_NULL_HANDLE &&
         g_ahb_swapchain &&
@@ -782,11 +811,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
     }
 
     /* === THE SNIPER HOOK ===
-     * Only intercept swapchains that EXACTLY match the AHB pool dimensions.
-     * All other swapchains (DXVK probing, UI overlays, different resolutions)
-     * pass through to the real Turnip driver. This lets DXVK's format/mode
-     * probing phase succeed normally against the real driver, and we only
-     * hijack the final gameplay swapchain. */
+     * Eligible gameplay swapchains are intercepted. Exact-size requests use the
+     * current pool; eligible resolution changes may reallocate the pool.
+     * Probe/overlay/incompatible swapchains were already rejected above. */
     AHardwareBuffer_Desc ahb_desc;
     AHardwareBuffer_describe(g_ahb_buffers[0], &ahb_desc);
     if (pCreateInfo->imageExtent.width != ahb_desc.width ||
