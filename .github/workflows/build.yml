@@ -160,6 +160,11 @@ jobs:
 
           Base: Ludashi 3.1
           Integration: E7G maintained branch
+          Highlights:
+          - End-to-end DXVK AHardwareBuffer Direct Render with SurfaceFlinger presentation
+          - Dynamic AHB swapchain pool reallocation and Vulkan/DRI3 fallback
+          - Bundled Proton 11.0-2 ARM64EC SDK28
+          - Root extreme performance mode retained
           APK is a debug-signed installable build produced by GitHub Actions."
 
           if gh release view "$TAG" >/dev/null 2>&1; then
