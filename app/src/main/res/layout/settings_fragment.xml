@@ -525,6 +525,22 @@
                             android:text="@string/high_refresh_rate" />
 
                         <CheckBox
+                            android:id="@+id/CBDirectAHBCompositor"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="left|center"
+                            android:text="@string/direct_ahb_compositor" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="32dp"
+                            android:paddingEnd="8dp"
+                            android:paddingBottom="6dp"
+                            android:text="@string/direct_ahb_compositor_summary"
+                            android:textSize="12sp" />
+
+                        <CheckBox
                             android:id="@+id/CBRootExtremePerformance"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
