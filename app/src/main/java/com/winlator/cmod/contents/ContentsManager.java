@@ -18,13 +18,17 @@ import java.io.File;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 public class ContentsManager {
     public static final String PROFILE_NAME = "profile.json";
     public static final String REMOTE_PROFILES = "https://raw.githubusercontent.com/StevenMXZ/Winlator-Contents/main/contents.json";
+    public static final String REMOTE_PROFILES_SUPPLEMENT = "https://raw.githubusercontent.com/E7G/winlator/main/components/contents-modern.json";
     public static final String[] DXVK_TRUST_FILES = {"${system32}/d3d8.dll", "${system32}/d3d9.dll", "${system32}/d3d10.dll", "${system32}/d3d10_1.dll",
             "${system32}/d3d10core.dll", "${system32}/d3d11.dll", "${system32}/dxgi.dll", "${syswow64}/d3d8.dll", "${syswow64}/d3d9.dll", "${syswow64}/d3d10.dll",
             "${syswow64}/d3d10_1.dll", "${syswow64}/d3d10core.dll", "${syswow64}/d3d11.dll", "${syswow64}/dxgi.dll"};
@@ -89,6 +93,67 @@ public class ContentsManager {
         void onFailed(InstallFailedReason reason, Exception e);
 
         void onSucceed(ContentProfile profile);
+    }
+
+    /**
+     * Downloads one or more content feeds and merges them into one JSON array.
+     *
+     * The built-in StevenMXZ feed remains the primary source. When the default
+     * URL is used, E7G's curated modern supplement is appended automatically.
+     * A custom setting can contain multiple feed URLs separated by ';' or newlines.
+     * Earlier sources win on duplicate type/version entries.
+     */
+    public static String downloadMergedRemoteProfiles(String configuredUrls) {
+        String configured = configuredUrls == null ? "" : configuredUrls.trim();
+        if (configured.isEmpty()) configured = REMOTE_PROFILES;
+
+        List<String> urls = new ArrayList<>();
+        for (String value : configured.split("[;\\r\\n]+")) {
+            String url = value.trim();
+            if (!url.isEmpty() && !urls.contains(url)) urls.add(url);
+        }
+        if (urls.isEmpty()) urls.add(REMOTE_PROFILES);
+
+        boolean usesDefault = false;
+        for (String url : urls) {
+            if (REMOTE_PROFILES.equals(url)) {
+                usesDefault = true;
+                break;
+            }
+        }
+        if (usesDefault && !urls.contains(REMOTE_PROFILES_SUPPLEMENT))
+            urls.add(REMOTE_PROFILES_SUPPLEMENT);
+
+        JSONArray merged = new JSONArray();
+        Set<String> seen = new HashSet<>();
+
+        for (String url : urls) {
+            String json = Downloader.downloadString(url);
+            if (json == null || json.trim().isEmpty()) continue;
+            try {
+                JSONArray source = new JSONArray(json);
+                for (int i = 0; i < source.length(); i++) {
+                    JSONObject object = source.optJSONObject(i);
+                    if (object == null) continue;
+                    String key = getRemoteProfileMergeKey(object);
+                    if (seen.add(key)) merged.put(object);
+                }
+            } catch (JSONException e) {
+                Log.w("ContentsManager", "Unable to parse content feed: " + url, e);
+            }
+        }
+
+        return merged.length() > 0 ? merged.toString() : null;
+    }
+
+    private static String getRemoteProfileMergeKey(JSONObject object) {
+        String type = object.optString("type", "").trim().toLowerCase(Locale.ROOT);
+        String name = object.optString("verName", "").trim().toLowerCase(Locale.ROOT);
+        String prefix = type + "-";
+        if (!type.isEmpty() && name.startsWith(prefix))
+            name = name.substring(prefix.length());
+        int verCode = object.optInt("verCode", 0);
+        return type + "|" + name + "|" + verCode;
     }
 
     public void setRemoteProfiles(String json) {
