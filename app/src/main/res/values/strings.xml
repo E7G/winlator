@@ -680,4 +680,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="driver_install_failed_invalid_zip">Installation failed: invalid driver ZIP</string>
     <string name="download_failed">Download failed</string>
     <string name="no_drivers_found">No drivers found</string>
+
+    <string name="root_extreme_performance_mode">Root extreme performance mode</string>
+    <string name="root_extreme_performance_summary">Temporarily max CPU/GPU clocks and prioritize Winlator processes. Thermal protection remains enabled.</string>
 </resources>
