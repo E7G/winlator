@@ -176,4 +176,23 @@
     <string name="performance">性能</string>
     <string name="preset">预设</string>
     <string name="you_cannot_remove_this_preset">无法删除此预设</string>
+
+    <string name="save">保存</string>
+    <string name="driver_sources">驱动源</string>
+    <string name="available_drivers">可用驱动</string>
+    <string name="add_source">添加源</string>
+    <string name="close">关闭</string>
+    <string name="back">返回</string>
+    <string name="add_repository">添加驱动源</string>
+    <string name="edit_repository">编辑驱动源</string>
+    <string name="driver_repo_name_hint">名称（例如 Turnip 驱动）</string>
+    <string name="github_api_url_hint">GitHub API 地址</string>
+    <string name="connection_failed">连接失败</string>
+    <string name="unknown_driver">未知驱动</string>
+    <string name="select_variant">选择版本</string>
+    <string name="downloading_driver">正在下载 %1$s…</string>
+    <string name="driver_installed">已安装：%1$s</string>
+    <string name="driver_install_failed_invalid_zip">安装失败：无效的驱动 ZIP</string>
+    <string name="download_failed">下载失败</string>
+    <string name="no_drivers_found">未找到可用驱动</string>
 </resources>
