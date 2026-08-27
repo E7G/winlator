@@ -75,6 +75,7 @@ import com.winlator.cmod.core.KeyValueSet;
 import com.winlator.cmod.core.OnExtractFileListener;
 import com.winlator.cmod.core.PreloaderDialog;
 import com.winlator.cmod.core.ProcessHelper;
+import com.winlator.cmod.core.RootPerformanceManager;
 import com.winlator.cmod.core.StringUtils;
 import com.winlator.cmod.core.TarCompressorUtils;
 import com.winlator.cmod.core.WineInfo;
@@ -166,6 +167,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private final EnvVars envVars = new EnvVars();
     private boolean firstTimeBoot = false;
     private SharedPreferences preferences;
+    private boolean rootExtremePerformance;
     private OnExtractFileListener onExtractFileListener;
     private WinHandler winHandler;
     private TaskManagerSidebar taskManagerSidebar;
@@ -264,6 +266,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         preloaderDialog = new PreloaderDialog(this);
         preferences = PreferenceManager.getDefaultSharedPreferences(this);
+        rootExtremePerformance = preferences.getBoolean("root_extreme_performance_mode", false);
+        RootPerformanceManager.recoverStaleStateAsync();
+        if (rootExtremePerformance) {
+            RootPerformanceManager.applyExtremeModeAsync(android.os.Process.myPid());
+        }
 
         cursorLock = preferences.getBoolean("cursor_lock", true);
 
@@ -803,6 +810,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     private void exit() {
         NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID);
+        if (rootExtremePerformance || RootPerformanceManager.isActive()) {
+            RootPerformanceManager.restoreAsync();
+        }
         boolean removeLoadingBar = PreferenceManager.getDefaultSharedPreferences(this)
                 .getBoolean("remove_loading_bar_when_booting_games", false);
         if (!removeLoadingBar) preloaderDialog.showOnUiThread(R.string.shutdown);
@@ -853,6 +863,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         if (taskManagerSidebar != null) taskManagerSidebar.stop();
+        if (rootExtremePerformance || RootPerformanceManager.isActive()) {
+            RootPerformanceManager.restoreAsync();
+        }
         super.onDestroy();
     }
 
@@ -1082,6 +1095,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         environment.startEnvironmentComponents();
+
+        if (rootExtremePerformance) {
+            RootPerformanceManager.boostProcessTreeAsync(android.os.Process.myPid());
+            handler.postDelayed(() -> RootPerformanceManager.boostProcessTreeAsync(android.os.Process.myPid()), 2500);
+            handler.postDelayed(() -> RootPerformanceManager.boostProcessTreeAsync(android.os.Process.myPid()), 8000);
+        }
 
         winHandler.start();
 
