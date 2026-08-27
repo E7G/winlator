@@ -132,7 +132,7 @@ public final class RootPerformanceManager {
     }
 
     private static RootResult runRoot(String command, int timeoutSeconds) {
-        Process proc = null;
+        java.lang.Process proc = null;
         StringBuilder out = new StringBuilder();
         try {
             proc = new ProcessBuilder("su", "-c", command)
