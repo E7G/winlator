@@ -1332,7 +1332,9 @@ public class ContainerDetailFragment extends Fragment implements DXVKConfigDialo
         view.findViewById(R.id.LLWineVersion).setVisibility(View.VISIBLE);
         String[] versions = getResources().getStringArray(R.array.wine_entries);
         ArrayList<String> wineVersions = new ArrayList<>();
-        wineVersions.addAll(Arrays.asList(versions));
+        wineVersions.add(WineInfo.MAIN_WINE_VERSION.identifier());
+        for (String version : versions)
+            if (!wineVersions.contains(version)) wineVersions.add(version);
         for (String identifier : ProtonPackageManager.getInstalledIdentifiers(context))
             if (!wineVersions.contains(identifier)) wineVersions.add(identifier);
         for (ContentProfile profile : contentsManager.getInstalledProfiles(ContentProfile.ContentType.CONTENT_TYPE_WINE))
