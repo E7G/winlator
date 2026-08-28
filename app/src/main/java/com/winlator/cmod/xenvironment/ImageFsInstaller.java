@@ -116,29 +116,71 @@ public abstract class ImageFsInstaller {
         }
     }
 
-    public static void installWineFromAssets(final DownloadProgressDialog dialog, final MainActivity activity) {
-        String[] versions = activity.getResources().getStringArray(R.array.wine_entries);
-        File rootDir = ImageFs.find(activity).getRootDir();
+    private static boolean isBundledMainWineReady(File wineDir) {
+        if (!wineDir.isDirectory()) return false;
+        File binDir = new File(wineDir, "bin");
+        if (!binDir.isDirectory()) return false;
+        return new File(binDir, "wine").exists() || new File(binDir, "wine64").exists();
+    }
+
+    /**
+     * Install exactly the runtime declared by WineInfo.MAIN_WINE_VERSION.
+     *
+     * Do not derive the bundled runtime from R.array.wine_entries: that array is
+     * UI metadata and previously drifted to Proton 9 while MAIN_WINE_VERSION had
+     * already moved to Proton 11. The mismatch caused every app launch to check
+     * for Proton 11, reinstall Proton 9, and then repeat forever.
+     */
+    public static boolean installWineFromAssets(final DownloadProgressDialog dialog, final MainActivity activity) {
+        final String version = WineInfo.MAIN_WINE_VERSION.identifier();
+        final File rootDir = ImageFs.find(activity).getRootDir();
+        final File optDir = new File(rootDir, "opt");
+        final File outFile = new File(optDir, version);
+        final File staging = new File(optDir, ".install-" + version);
         final byte compressionRatio = 22;
 
         activity.runOnUiThread(() -> dialog.setMessage(R.string.installing_wine_files));
 
-        for (String version : versions) {
-            File outFile = new File(rootDir, "opt/" + version);
-            FileUtils.delete(outFile);
-            outFile.mkdirs();
-            final long contentLength = (long)(FileUtils.getSize(activity, version + ".tar.zst") * (100.0f / compressionRatio));
-            AtomicLong totalSizeRef = new AtomicLong();
+        if (isBundledMainWineReady(outFile)) return true;
 
-            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, activity, version + ".tar.zst", outFile, (file, size) -> {
-                if (size > 0) {
-                    long totalSize = totalSizeRef.addAndGet(size);
-                    final int progress = (int)(((float)totalSize / contentLength) * 100);
-                    activity.runOnUiThread(() -> dialog.setProgress(progress));
-                }
-                return file;
-            });
-         }
+        optDir.mkdirs();
+        FileUtils.delete(staging);
+        staging.mkdirs();
+
+        final String assetName = version + ".tar.zst";
+        final long compressedSize = FileUtils.getSize(activity, assetName);
+        final long contentLength = compressedSize > 0
+                ? (long)(compressedSize * (100.0f / compressionRatio))
+                : 0L;
+        AtomicLong totalSizeRef = new AtomicLong();
+
+        boolean success = TarCompressorUtils.extract(
+                TarCompressorUtils.Type.ZSTD,
+                activity,
+                assetName,
+                staging,
+                (file, size) -> {
+                    if (size > 0 && contentLength > 0) {
+                        long totalSize = totalSizeRef.addAndGet(size);
+                        final int progress = Math.min(100, (int)(((float)totalSize / contentLength) * 100));
+                        activity.runOnUiThread(() -> dialog.setProgress(progress));
+                    }
+                    return file;
+                });
+
+        if (!success || !isBundledMainWineReady(staging)) {
+            FileUtils.delete(staging);
+            return false;
+        }
+
+        // Replace only the bundled main runtime. Legacy Proton 9/10 installs are
+        // intentionally preserved for containers that still reference them.
+        FileUtils.delete(outFile);
+        if (!staging.renameTo(outFile)) {
+            FileUtils.delete(staging);
+            return false;
+        }
+        return true;
     }
 
     public static void installDriversFromAssets(final DownloadProgressDialog dialog, final MainActivity activity) {
@@ -188,7 +230,10 @@ public abstract class ImageFsInstaller {
             });
 
             if (success) {
-                installWineFromAssets(dialog, activity);
+                success = installWineFromAssets(dialog, activity);
+            }
+
+            if (success) {
                 installDriversFromAssets(dialog, activity);
                 imageFs.createImgVersionFile(LATEST_VERSION);
                 FileUtils.symlink("libSDL2-2.0.so", new File(imageFs.getLibDir(), "libSDL2-2.0.so.0").getAbsolutePath());
@@ -212,12 +257,12 @@ public abstract class ImageFsInstaller {
         // App upgrades should add the new bundled Proton without wiping an
         // existing imagefs or legacy Proton used by older containers.
         File mainWine = new File(imageFs.getRootDir(), "opt/" + WineInfo.MAIN_WINE_VERSION.identifier());
-        File[] mainFiles = mainWine.listFiles();
-        if (!mainWine.isDirectory() || mainFiles == null || mainFiles.length == 0) {
+        if (!isBundledMainWineReady(mainWine)) {
             final DownloadProgressDialog dialog = new DownloadProgressDialog(activity);
             dialog.show(R.string.installing_wine_files);
             Executors.newSingleThreadExecutor().execute(() -> {
-                installWineFromAssets(dialog, activity);
+                boolean success = installWineFromAssets(dialog, activity);
+                if (!success) AppUtils.showToast(activity, R.string.unable_to_install_system_files);
                 dialog.closeOnUiThread();
                 activity.runOnUiThread(() -> {
                     if (callback != null) callback.call();
