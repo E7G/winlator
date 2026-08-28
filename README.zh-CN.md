@@ -3,6 +3,17 @@
 这是基于 **Winlator Ludashi 3.1** 的可维护整合分支，目标是保留 3.1 的新渲染/输入/存储修复，同时吸收 Ludashi Plus 中仍然适用于 3.1 的优化思路，并提供中文界面、可复现构建和自动 Release。
 
 
+## 3.1-E7G.5：高画质通用超分
+
+- 新增 **Snapdragon GSR · 高画质（边缘方向）**：基于 Qualcomm 公开 SGSR1 edge-direction 变体，使用 12-tap Lanczos-like 重建、边缘方向权重和自适应锐化。
+- 保留原 **Snapdragon GSR · 性能**，适合优先帧率/功耗。
+- 滤镜现在有：双线性、最近邻、SGSR 性能、SGSR 高画质。
+- 高画质超分仍是单帧空间超分，不依赖游戏提供 motion vector/depth，因此可以对 DXVK/Wine 游戏通用使用。
+- 开启任何超分滤镜时会自动退出 AHB Direct Render，走 VulkanRenderer 完成重建；关闭超分后 Direct Render 可再次命中。
+- 已将 Snapdragon GSR BSD-3-Clause 许可证随 APK 一起打包。
+
+说明：Qualcomm 当前更高画质的 SGSR2 属于时域超分，需要低分辨率 color、depth 和 motion vectors。Winlator 最终合成层没有这些游戏内部缓冲，因此没有伪装成“通用 SGSR2”。
+
 ## 3.1-E7G.4：端到端 DXVK AHB + Proton 11
 
 - **端到端 DXVK AHB Direct Render**：DXVK 的 gameplay swapchain 直接使用 AHardwareBuffer-backed VkImage，渲染完成后通过 SYNC_FD 交给 SurfaceFlinger；命中时不再经过 Winlator Vulkan 合成，也不需要中间 blit。

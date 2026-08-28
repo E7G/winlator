@@ -1068,7 +1068,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         final boolean nativeRenderingEnabled = shortcut != null
                 ? shortcut.getRendererNative()
                 : (container != null && container.isRendererNative());
+        final int rendererFilterMode = shortcut != null
+                ? shortcut.getRendererFilterMode()
+                : (container != null ? container.getRendererFilterMode() : 0);
         final boolean endToEndDirectAHB = nativeRenderingEnabled
+                && rendererFilterMode == 0
                 && preferences.getBoolean("direct_ahb_compositor", false);
         guestProgramLauncherComponent.setDirectAHB(endToEndDirectAHB);
 

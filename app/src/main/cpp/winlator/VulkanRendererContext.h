@@ -287,8 +287,9 @@ private:
     VkPipelineLayout      pipeLayout  = VK_NULL_HANDLE;
 
     VkPipeline            pipeline    = VK_NULL_HANDLE;
-    VkPipeline            sgsrPipeline   = VK_NULL_HANDLE;
-    VkPipeline            stretchPipeline= VK_NULL_HANDLE;
+    VkPipeline            sgsrPipeline        = VK_NULL_HANDLE;
+    VkPipeline            sgsrQualityPipeline = VK_NULL_HANDLE;
+    VkPipeline            stretchPipeline     = VK_NULL_HANDLE;
     VkPipeline            postfxPipeline = VK_NULL_HANDLE;
 
     VkCommandPool                cmdPool = VK_NULL_HANDLE;
@@ -324,6 +325,7 @@ private:
     void createDSLayout();
     void createPipeline(bool blend, VkPipeline& out);
     void createSgsrPipeline();
+    void createSgsrQualityPipeline();
     void createStretchPipeline();
     void createPostFXPipeline();
     void createFramebuffers();

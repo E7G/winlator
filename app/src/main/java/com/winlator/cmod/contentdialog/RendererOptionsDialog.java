@@ -46,10 +46,11 @@ public class RendererOptionsDialog extends ContentDialog {
         "Fifo"
     };
 
-    private static final String[] FILTER_LABELS = {
-        "Bilinear",
-        "Nearest neighbor",
-        "Snapdragon Super Resolution"
+    private static final int[] FILTER_LABEL_IDS = {
+        R.string.renderer_filter_bilinear,
+        R.string.renderer_filter_nearest,
+        R.string.renderer_filter_sgsr_performance,
+        R.string.renderer_filter_sgsr_quality
     };
 
     public RendererOptionsDialog(View anchorView, Config config, boolean isNativeMode) {
@@ -96,9 +97,14 @@ public class RendererOptionsDialog extends ContentDialog {
         }
         spDriver.setSelection(drvSel);
 
-        // Texture Filter
-        setAmoledAdapter(ctx, spFilter, FILTER_LABELS);
-        spFilter.setSelection(config.getRendererFilterMode());
+        // Texture Filter / universal spatial super resolution.
+        String[] filterLabels = new String[FILTER_LABEL_IDS.length];
+        for (int i = 0; i < FILTER_LABEL_IDS.length; i++)
+            filterLabels[i] = ctx.getString(FILTER_LABEL_IDS[i]);
+        setAmoledAdapter(ctx, spFilter, filterLabels);
+        int filterSel = config.getRendererFilterMode();
+        if (filterSel < 0 || filterSel >= filterLabels.length) filterSel = 0;
+        spFilter.setSelection(filterSel);
         cbSwapRB.setChecked(config.getRendererSwapRB());
 
         // Save on confirm

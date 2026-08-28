@@ -679,4 +679,9 @@
     <string name="direct_ahb_compositor_summary">当前容器同时开启 Native Rendering+ 时，DXVK 会直接渲染到 AHardwareBuffer swapchain 并交给 SurfaceFlinger；不支持时自动回退。</string>
     <string name="native_rendering_plus">Native Rendering+（AHB 直出）</string>
     <string name="native_rendering_plus_summary">符合条件的 DRI3 AHardwareBuffer 帧直接交给 SurfaceFlinger 显示；不兼容场景会自动回退 Vulkan。</string>
+    <string name="renderer_filter_bilinear">双线性</string>
+    <string name="renderer_filter_nearest">最近邻</string>
+    <string name="renderer_filter_sgsr_performance">Snapdragon GSR · 性能</string>
+    <string name="renderer_filter_sgsr_quality">Snapdragon GSR · 高画质（边缘方向）</string>
+    <string name="renderer_filter_summary">高画质模式使用 Qualcomm SGSR 边缘方向空间超分。启用超分时需要 Vulkan 合成，因此会自动暂时绕过 AHB Direct Render。</string>
 </resources>

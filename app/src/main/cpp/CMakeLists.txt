@@ -78,6 +78,15 @@ add_custom_command(
 )
 
 add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_quality_frag.h
+    COMMAND glslangValidator -V --vn window_sgsr_quality_frag_code
+            -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_quality_frag.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/winlator/window_sgsr_quality.frag
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/winlator/window_sgsr_quality.frag
+    COMMENT "Compiling window_sgsr_quality.frag → window_sgsr_quality_frag.h"
+)
+
+add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/window_stretch_frag.h
     COMMAND glslangValidator -V --vn window_stretch_frag_code
             -x -o ${CMAKE_CURRENT_BINARY_DIR}/window_stretch_frag.h
@@ -105,6 +114,7 @@ add_library(vulkan_renderer SHARED
         ${CMAKE_CURRENT_BINARY_DIR}/window_vert.h
         ${CMAKE_CURRENT_BINARY_DIR}/window_frag.h
         ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_frag.h
+        ${CMAKE_CURRENT_BINARY_DIR}/window_sgsr_quality_frag.h
         ${CMAKE_CURRENT_BINARY_DIR}/window_stretch_frag.h
         ${CMAKE_CURRENT_BINARY_DIR}/window_postfx_frag.h
 )
