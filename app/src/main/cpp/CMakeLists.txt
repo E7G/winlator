@@ -121,3 +121,27 @@ target_link_libraries(vulkan_renderer
         dl
         atomic
 )
+
+
+# DXVK/Wine end-to-end AHardwareBuffer Vulkan layer.
+# Build from source together with the Android receiver so the fixed-size IPC
+# protocol and direct-render behavior can never drift from a stale jniLibs blob.
+add_library(ahb_layer SHARED
+        ../../../../dlls/vulkan_layer/ahb_layer.c
+        ../../../../dlls/wineandroid.drv/vulkan_ahb.c
+)
+
+target_include_directories(ahb_layer PRIVATE
+        ../../../../dlls/wineandroid.drv
+)
+
+target_compile_options(ahb_layer PRIVATE
+        -Wall -Wextra -fvisibility=hidden
+)
+
+target_link_libraries(ahb_layer
+        log
+        android
+        vulkan
+        dl
+)

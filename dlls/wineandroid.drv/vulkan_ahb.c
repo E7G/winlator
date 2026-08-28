@@ -394,7 +394,43 @@ VkResult import_ahb_to_vk_image(struct wine_vk_swapchain *swapchain,
         return res;
     }
 
-    /* Import the AHardwareBuffer as device memory */
+    /* Import the AHardwareBuffer as device memory.
+     *
+     * VK_ANDROID_external_memory_android_hardware_buffer requires allocationSize
+     * and memoryTypeIndex to come from vkGetAndroidHardwareBufferPropertiesANDROID.
+     * Guessing device-local memory type 0 and using allocationSize=0 works on some
+     * stacks but is not portable and breaks direct render on stricter Turnip builds.
+     */
+    PFN_vkGetAndroidHardwareBufferPropertiesANDROID get_ahb_props =
+        (PFN_vkGetAndroidHardwareBufferPropertiesANDROID)
+        swapchain->pfn_vkGetDeviceProcAddr(device, "vkGetAndroidHardwareBufferPropertiesANDROID");
+    if (!get_ahb_props)
+    {
+        LOGE("import_ahb_to_vk_image: vkGetAndroidHardwareBufferPropertiesANDROID unavailable");
+        swapchain->pfn_vkDestroyImage(device, swapchain->images[slot_index].vk_image, NULL);
+        swapchain->images[slot_index].vk_image = VK_NULL_HANDLE;
+        return VK_ERROR_EXTENSION_NOT_PRESENT;
+    }
+
+    VkAndroidHardwareBufferFormatPropertiesANDROID format_props = {
+        .sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID,
+        .pNext = NULL,
+    };
+    VkAndroidHardwareBufferPropertiesANDROID ahb_props = {
+        .sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID,
+        .pNext = &format_props,
+    };
+    res = get_ahb_props(device, ahb, &ahb_props);
+    if (res != VK_SUCCESS || ahb_props.allocationSize == 0 || ahb_props.memoryTypeBits == 0)
+    {
+        LOGE("import_ahb_to_vk_image: AHB properties failed slot %u: res=%d size=%llu bits=0x%x",
+             slot_index, res, (unsigned long long)ahb_props.allocationSize,
+             ahb_props.memoryTypeBits);
+        swapchain->pfn_vkDestroyImage(device, swapchain->images[slot_index].vk_image, NULL);
+        swapchain->images[slot_index].vk_image = VK_NULL_HANDLE;
+        return res != VK_SUCCESS ? res : VK_ERROR_INVALID_EXTERNAL_HANDLE;
+    }
+
     VkImportAndroidHardwareBufferInfoANDROID import_ahb_info = {
         .sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID,
         .pNext = NULL,
@@ -408,36 +444,52 @@ VkResult import_ahb_to_vk_image(struct wine_vk_swapchain *swapchain,
         .buffer = VK_NULL_HANDLE,
     };
 
-    /* Get memory requirements to find the right memory type */
     VkPhysicalDeviceMemoryProperties mem_props;
     get_mem_props(phys_device, &mem_props);
 
-    /* For AHB imports, we typically use memory type 0 or find one that supports
-     * the required memory type bits. The actual memory type is determined by
-     * the AHB allocation, so we use the first available type. */
-    VkMemoryAllocateInfo alloc_info = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext = &dedicated_info,
-        .allocationSize = 0, /* Ignored for AHB imports */
-        .memoryTypeIndex = 0,
-    };
-
-    /* Find a suitable memory type for device-local memory */
+    uint32_t memory_type = UINT32_MAX;
     for (uint32_t i = 0; i < mem_props.memoryTypeCount; i++)
     {
-        if (mem_props.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+        if ((ahb_props.memoryTypeBits & (1u << i)) &&
+            (mem_props.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
         {
-            alloc_info.memoryTypeIndex = i;
+            memory_type = i;
             break;
         }
     }
+    if (memory_type == UINT32_MAX)
+    {
+        for (uint32_t i = 0; i < mem_props.memoryTypeCount; i++)
+        {
+            if (ahb_props.memoryTypeBits & (1u << i))
+            {
+                memory_type = i;
+                break;
+            }
+        }
+    }
+    if (memory_type == UINT32_MAX)
+    {
+        LOGE("import_ahb_to_vk_image: no compatible memory type for bits=0x%x",
+             ahb_props.memoryTypeBits);
+        swapchain->pfn_vkDestroyImage(device, swapchain->images[slot_index].vk_image, NULL);
+        swapchain->images[slot_index].vk_image = VK_NULL_HANDLE;
+        return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+    }
+
+    VkMemoryAllocateInfo alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .pNext = &dedicated_info,
+        .allocationSize = ahb_props.allocationSize,
+        .memoryTypeIndex = memory_type,
+    };
 
     res = swapchain->pfn_vkAllocateMemory(device, &alloc_info, NULL,
                                           &swapchain->images[slot_index].vk_memory);
     if (res != VK_SUCCESS)
     {
-        LOGE("import_ahb_to_vk_image: vkAllocateMemory failed for slot %u: %d",
-             slot_index, res);
+        LOGE("import_ahb_to_vk_image: vkAllocateMemory failed for slot %u: %d (size=%llu type=%u)",
+             slot_index, res, (unsigned long long)ahb_props.allocationSize, memory_type);
         swapchain->pfn_vkDestroyImage(device, swapchain->images[slot_index].vk_image, NULL);
         swapchain->images[slot_index].vk_image = VK_NULL_HANDLE;
         return res;

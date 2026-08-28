@@ -684,8 +684,8 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="root_extreme_performance_mode">Root extreme performance mode</string>
     <string name="root_extreme_performance_summary">Temporarily max CPU/GPU clocks and prioritize Winlator processes. Thermal protection remains enabled.</string>
 
-    <string name="direct_ahb_compositor">Direct AHB zero-copy compositor (experimental)</string>
-    <string name="direct_ahb_compositor_summary">DXVK/Wine frames travel through AHardwareBuffer to SurfaceFlinger. Automatically falls back to the 3.1 Vulkan renderer if unavailable.</string>
+    <string name="direct_ahb_compositor">End-to-end DXVK AHB Direct Render (experimental)</string>
+    <string name="direct_ahb_compositor_summary">With Native Rendering+ enabled for the container, DXVK renders directly into AHardwareBuffer swapchain images and presents them to SurfaceFlinger. Falls back automatically when unsupported.</string>
     <string name="native_rendering_plus">Native Rendering+ (AHB direct)</string>
     <string name="native_rendering_plus_summary">Directly presents eligible DRI3 AHardwareBuffer frames through SurfaceFlinger. Automatically falls back to Vulkan when unsupported.</string>
 </resources>

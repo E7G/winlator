@@ -771,6 +771,35 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
          pCreateInfo->imageFormat, pCreateInfo->presentMode,
          pCreateInfo->minImageCount, (void*)(uintptr_t)pCreateInfo->oldSwapchain);
 
+    /*
+     * Dynamic pool resizing must not broaden the old "sniper hook" into a
+     * catch-all swapchain interceptor. DXVK and overlays can create tiny probe
+     * swapchains whose dimensions intentionally differ from the gameplay
+     * surface. Reallocating the Android AHB pool for those would evict a valid
+     * game pool and can produce black screens.
+     *
+     * Keep interception conservative. If a title uses a different format or a
+     * very small presentation surface it still has the DRI3-AHB and normal
+     * VulkanRenderer fallbacks.
+     */
+    const bool plausible_gameplay_swapchain =
+        pCreateInfo->imageArrayLayers == 1 &&
+        (pCreateInfo->imageUsage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) != 0 &&
+        pCreateInfo->imageExtent.width >= 320 &&
+        pCreateInfo->imageExtent.height >= 180 &&
+        pCreateInfo->imageExtent.width <= 8192 &&
+        pCreateInfo->imageExtent.height <= 8192 &&
+        pCreateInfo->imageFormat == VK_FORMAT_B8G8R8A8_UNORM;
+
+    if (!plausible_gameplay_swapchain) {
+        LOGI("layer_CreateSwapchainKHR: PASSTHROUGH non-gameplay candidate "
+             "(%ux%u fmt=%d layers=%u usage=0x%x)",
+             pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height,
+             pCreateInfo->imageFormat, pCreateInfo->imageArrayLayers,
+             pCreateInfo->imageUsage);
+        return g_dev_dispatch.CreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
+    }
+
     /* Handle oldSwapchain: if it's our AHB swapchain, destroy it first */
     if (pCreateInfo->oldSwapchain != VK_NULL_HANDLE &&
         g_ahb_swapchain &&
@@ -782,11 +811,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateSwapchainKHR(
     }
 
     /* === THE SNIPER HOOK ===
-     * Only intercept swapchains that EXACTLY match the AHB pool dimensions.
-     * All other swapchains (DXVK probing, UI overlays, different resolutions)
-     * pass through to the real Turnip driver. This lets DXVK's format/mode
-     * probing phase succeed normally against the real driver, and we only
-     * hijack the final gameplay swapchain. */
+     * Eligible gameplay swapchains are intercepted. Exact-size requests use the
+     * current pool; eligible resolution changes may reallocate the pool.
+     * Probe/overlay/incompatible swapchains were already rejected above. */
     AHardwareBuffer_Desc ahb_desc;
     AHardwareBuffer_describe(g_ahb_buffers[0], &ahb_desc);
     if (pCreateInfo->imageExtent.width != ahb_desc.width ||
@@ -1689,11 +1716,11 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_QueuePresentKHR(
                     g_presented_ring[g_presented_idx] = (int)ahb_slot;
                     g_presented_idx = (g_presented_idx + 1) % 2;
 
-                    /* DXVK wrote BGRA bytes into the AHB (Wine's winevulkan
-                     * thunk picks BGRA regardless of our surface-format
-                     * advertisement). Tell the receiver to do an R↔B swap
-                     * via its local format-aware blit. */
-                    wine_ahb_queue_present(g_ahb_swapchain, queue, ahb_slot, fence, present_id_this, /*bgra_bytes=*/1);
+                    /* End-to-end native BGRA: the Android pool is HAL_BGRA_8888
+                     * and these images are imported as VK_FORMAT_B8G8R8A8_UNORM.
+                     * SurfaceFlinger therefore consumes the same byte layout DXVK
+                     * rendered; no shader/blit/channel conversion is required. */
+                    wine_ahb_queue_present(g_ahb_swapchain, queue, ahb_slot, fence, present_id_this, /*bgra_bytes=*/0);
                 }
                 /* === BLIT INDIRECTION: copy trojan image → AHB image ===
                  * Per-slot resources prevent cross-frame fence reuse (Adreno timeout).
@@ -1856,7 +1883,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_QueuePresentKHR(
                      * are the same format and the operation degenerates
                      * to a byte copy. AHB memory holds BGRA bytes →
                      * receiver should treat it as BGRA. */
-                    wine_ahb_queue_present(g_ahb_swapchain, queue, ahb_slot, fence, present_id_this, /*bgra_bytes=*/1);
+                    wine_ahb_queue_present(g_ahb_swapchain, queue, ahb_slot, fence, present_id_this, /*bgra_bytes=*/0);
                 } else {
                     /* Fallback path: no blit infrastructure — preserve pre-fix
                      * behavior of just draining wait semaphores and forwarding. */
@@ -1880,7 +1907,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_QueuePresentKHR(
                      * write with no layer-side translation. AHB pool is
                      * HAL_BGRA so DXVK's BGRA writes match the byte layout —
                      * flag as BGRA. */
-                    wine_ahb_queue_present(g_ahb_swapchain, VK_NULL_HANDLE, ahb_slot, VK_NULL_HANDLE, present_id_this, /*bgra_bytes=*/1);
+                    wine_ahb_queue_present(g_ahb_swapchain, VK_NULL_HANDLE, ahb_slot, VK_NULL_HANDLE, present_id_this, /*bgra_bytes=*/0);
                 }
 
                 static int _cnt = 0;
@@ -1976,42 +2003,75 @@ static VKAPI_ATTR VkResult VKAPI_CALL layer_CreateDevice(
         fpGetInstanceProcAddr(g_instance, "vkCreateDevice");
     if (!fpCreateDevice) return VK_ERROR_INITIALIZATION_FAILED;
 
-    /* Inject VK_KHR_external_fence_fd into the enabled device extensions if the
-     * app (DXVK) hasn't requested it. vkGetFenceFdKHR (used to export the blit
-     * fence as a SYNC_FD for SurfaceFlinger) only works if this extension is
-     * enabled. Without it, present_msg goes out with acquireFd=-1 and the
-     * release chain has no GPU-completion guarantee — leading to cmd_buf
-     * reuse-while-pending and Adreno hangs. */
+    /* End-to-end AHB needs both the Android external-memory extension and
+     * exportable sync fences. DXVK does not necessarily request either because
+     * normal WSI swapchains do not need them, so enable the supported missing
+     * extensions at the layer boundary. */
     static const char *kExtFenceFd = "VK_KHR_external_fence_fd";
-    VkDeviceCreateInfo modified_ci = *pCreateInfo;
-    const char **injected_exts = NULL;
+    static const char *kExtAhb = VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME;
     bool has_fence_fd = false;
+    bool has_ahb = false;
     for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; i++) {
-        if (strcmp(pCreateInfo->ppEnabledExtensionNames[i], kExtFenceFd) == 0) {
-            has_fence_fd = true;
-            break;
-        }
+        const char *name = pCreateInfo->ppEnabledExtensionNames[i];
+        if (strcmp(name, kExtFenceFd) == 0) has_fence_fd = true;
+        if (strcmp(name, kExtAhb) == 0) has_ahb = true;
     }
-    if (!has_fence_fd) {
-        uint32_t n = pCreateInfo->enabledExtensionCount;
-        injected_exts = (const char **)malloc(sizeof(char*) * (n + 1));
-        if (injected_exts) {
-            for (uint32_t i = 0; i < n; i++)
-                injected_exts[i] = pCreateInfo->ppEnabledExtensionNames[i];
-            injected_exts[n] = kExtFenceFd;
-            modified_ci.enabledExtensionCount = n + 1;
-            modified_ci.ppEnabledExtensionNames = injected_exts;
-            LOGI("layer_CreateDevice: injected %s into device extensions", kExtFenceFd);
+
+    bool supports_fence_fd = false;
+    bool supports_ahb = false;
+    if (g_inst_dispatch.EnumerateDeviceExtensionProperties) {
+        uint32_t ext_count = 0;
+        if (g_inst_dispatch.EnumerateDeviceExtensionProperties(
+                physicalDevice, NULL, &ext_count, NULL) == VK_SUCCESS && ext_count > 0) {
+            VkExtensionProperties *props =
+                (VkExtensionProperties *)calloc(ext_count, sizeof(VkExtensionProperties));
+            if (props && g_inst_dispatch.EnumerateDeviceExtensionProperties(
+                    physicalDevice, NULL, &ext_count, props) == VK_SUCCESS) {
+                for (uint32_t i = 0; i < ext_count; ++i) {
+                    if (strcmp(props[i].extensionName, kExtFenceFd) == 0)
+                        supports_fence_fd = true;
+                    if (strcmp(props[i].extensionName, kExtAhb) == 0)
+                        supports_ahb = true;
+                }
+            }
+            free(props);
         }
     }
 
+    VkDeviceCreateInfo modified_ci = *pCreateInfo;
+    const char **injected_exts = NULL;
+    uint32_t inject_count = 0;
+    if (!has_fence_fd && supports_fence_fd) inject_count++;
+    if (!has_ahb && supports_ahb) inject_count++;
+
+    if (inject_count > 0) {
+        uint32_t n = pCreateInfo->enabledExtensionCount;
+        injected_exts = (const char **)malloc(sizeof(char*) * (n + inject_count));
+        if (injected_exts) {
+            for (uint32_t i = 0; i < n; ++i)
+                injected_exts[i] = pCreateInfo->ppEnabledExtensionNames[i];
+            uint32_t out = n;
+            if (!has_fence_fd && supports_fence_fd) {
+                injected_exts[out++] = kExtFenceFd;
+                LOGI("layer_CreateDevice: injected %s", kExtFenceFd);
+            }
+            if (!has_ahb && supports_ahb) {
+                injected_exts[out++] = kExtAhb;
+                LOGI("layer_CreateDevice: injected %s", kExtAhb);
+            }
+            modified_ci.enabledExtensionCount = out;
+            modified_ci.ppEnabledExtensionNames = injected_exts;
+        }
+    }
+
+    const bool had_injected_extensions = injected_exts != NULL;
     VkResult result = fpCreateDevice(physicalDevice, &modified_ci, pAllocator, pDevice);
     if (injected_exts) free(injected_exts);
     if (result != VK_SUCCESS) {
         /* If injection caused the failure (device doesn't expose the extension),
          * retry without it — we'll fall back to a CPU fence-wait path. */
-        if (!has_fence_fd) {
-            LOGW("layer_CreateDevice: CreateDevice failed with injected ext (%d), retrying without", result);
+        if (had_injected_extensions) {
+            LOGW("layer_CreateDevice: CreateDevice failed with injected extensions (%d), retrying original request", result);
             result = fpCreateDevice(physicalDevice, pCreateInfo, pAllocator, pDevice);
         }
         if (result != VK_SUCCESS) return result;

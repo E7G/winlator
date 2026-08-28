@@ -40,6 +40,7 @@ struct CallbackContext {
     uint32_t slot;
     uint8_t type;
     uint8_t displayed;
+    std::shared_ptr<std::mutex> writeMutex;
 };
 
 static void transactionCallback(void* opaque, void*) {
@@ -53,7 +54,12 @@ static void transactionCallback(void* opaque, void*) {
     msg.displayed = ctx->displayed;
     msg.vsyncTimeNs = 0;
     if (ctx->fd >= 0) {
-        (void)send(ctx->fd, &msg, sizeof(msg), MSG_NOSIGNAL);
+        if (ctx->writeMutex) {
+            std::lock_guard<std::mutex> writeLock(*ctx->writeMutex);
+            (void)send(ctx->fd, &msg, sizeof(msg), MSG_NOSIGNAL);
+        } else {
+            (void)send(ctx->fd, &msg, sizeof(msg), MSG_NOSIGNAL);
+        }
         close(ctx->fd);
     }
     delete ctx;
@@ -172,7 +178,12 @@ bool DirectAHBCompositor::start(ANativeWindow* parentWindow, int fd,
         socketFd = fd;
         logicalWidth = std::max(width, 1);
         logicalHeight = std::max(height, 1);
-        buffers.assign(ahbs, ahbs + count);
+        buffers.clear();
+        buffers.reserve(count);
+        for (int i = 0; i < count; ++i) {
+            AHardwareBuffer_acquire(ahbs[i]);
+            buffers.push_back(ahbs[i]);
+        }
         currentSlot = -1;
         paused = false;
         dstX = dstY = 0;
@@ -278,8 +289,87 @@ void DirectAHBCompositor::stop() {
         AHardwareBuffer_release(cursorBuffer);
         cursorBuffer = nullptr;
     }
-    buffers.clear();
+    releaseBuffersLocked();
     paused = false;
+}
+
+void DirectAHBCompositor::releaseBuffersLocked() {
+    for (AHardwareBuffer* ahb : buffers) {
+        if (ahb) AHardwareBuffer_release(ahb);
+    }
+    buffers.clear();
+}
+
+bool DirectAHBCompositor::sendReallocAckAndBuffersLocked(
+        const std::vector<AHardwareBuffer*>& newBuffers) {
+    if (socketFd < 0) return false;
+    std::lock_guard<std::mutex> writeLock(*socketWriteMutex);
+
+    ReleaseMsg ack{};
+    ack.type = MSG_REALLOC_ACK;
+    ack.slotIndex = static_cast<uint32_t>(newBuffers.size());
+    ack.releaseFd = -1;
+    if (send(socketFd, &ack, sizeof(ack), MSG_NOSIGNAL) != (ssize_t)sizeof(ack))
+        return false;
+
+    for (AHardwareBuffer* ahb : newBuffers) {
+        if (!ahb || AHardwareBuffer_sendHandleToUnixSocket(ahb, socketFd) != 0)
+            return false;
+    }
+    return true;
+}
+
+bool DirectAHBCompositor::reallocateBuffersLocked(int width, int height, int count) {
+    if (width <= 0 || height <= 0 || width > 8192 || height > 8192 ||
+            count < 2 || count > 4 || socketFd < 0)
+        return false;
+
+    std::vector<AHardwareBuffer*> fresh;
+    fresh.reserve(count);
+    for (int i = 0; i < count; ++i) {
+        AHardwareBuffer_Desc desc{};
+        desc.width = static_cast<uint32_t>(width);
+        desc.height = static_cast<uint32_t>(height);
+        desc.layers = 1;
+        // Keep the exact byte format used by DXVK's preferred swapchain.
+        desc.format = 5; // HAL_PIXEL_FORMAT_BGRA_8888
+        desc.usage = 0xB00ULL; // GPU_COLOR_OUTPUT | GPU_SAMPLED_IMAGE | COMPOSER_OVERLAY
+
+        AHardwareBuffer* ahb = nullptr;
+        if (AHardwareBuffer_allocate(&desc, &ahb) != 0 || !ahb) {
+            for (AHardwareBuffer* p : fresh) AHardwareBuffer_release(p);
+            return false;
+        }
+        fresh.push_back(ahb);
+    }
+
+    // Resolution changes are rare. Give any old SurfaceControl onComplete
+    // callbacks two/three display intervals to drain before the ACK+handle
+    // sequence. The shared write mutex then guarantees the ACK and all handles
+    // are contiguous on the SOCK_STREAM protocol.
+    usleep(50000);
+
+    if (!sendReallocAckAndBuffersLocked(fresh)) {
+        for (AHardwareBuffer* p : fresh) AHardwareBuffer_release(p);
+        // The positive ACK may already be on the stream. Do not append ACK=0
+        // behind a partial handle sequence; terminate the connection so the
+        // guest's recvHandle fails deterministically and its Vulkan layer falls back.
+        running.store(false, std::memory_order_release);
+        if (socketFd >= 0) shutdown(socketFd, SHUT_RDWR);
+        return false;
+    }
+
+    releaseBuffersLocked();
+    buffers.swap(fresh);
+    logicalWidth = width;
+    logicalHeight = height;
+    dstX = dstY = 0;
+    dstW = width;
+    dstH = height;
+    currentSlot = -1;
+    presenting.store(false, std::memory_order_release);
+    DLOGI("dynamic AHB pool reallocated: %dx%d x %d", width, height, count);
+    return true;
 }
 
 void DirectAHBCompositor::releaseSlot(uint32_t slot, bool displayed) {
@@ -290,6 +380,7 @@ void DirectAHBCompositor::releaseSlot(uint32_t slot, bool displayed) {
     rel.releaseFd = -1;
     rel.displayed = displayed ? 1 : 0;
     rel.vsyncTimeNs = 0;
+    std::lock_guard<std::mutex> writeLock(*socketWriteMutex);
     (void)send(socketFd, &rel, sizeof(rel), MSG_NOSIGNAL);
 }
 
@@ -298,6 +389,7 @@ void DirectAHBCompositor::sendTick() {
     ReleaseMsg tick{};
     tick.type = MSG_TICK;
     tick.releaseFd = -1;
+    std::lock_guard<std::mutex> writeLock(*socketWriteMutex);
     (void)send(socketFd, &tick, sizeof(tick), MSG_NOSIGNAL);
 }
 
@@ -333,15 +425,9 @@ bool DirectAHBCompositor::submitFrameLocked(const PresentMsg& msg, int acquireFe
         releaseSlot(msg.slotIndex, false);
         return false;
     }
-    // Direct-render mode may expose BGRA bytes in an RGBA AHB. The first
-    // implementation intentionally uses the layer's normalized blit mode.
-    if (msg.bgraBytes != 0) {
-        if (acquireFenceFd >= 0) close(acquireFenceFd);
-        DLOGW("BGRA direct-render frame rejected; falling back to normalized AHB mode");
-        releaseSlot(msg.slotIndex, false);
-        return false;
-    }
-
+    // The E7G pool is HAL_PIXEL_FORMAT_BGRA_8888 and the Vulkan layer imports
+    // it as VK_FORMAT_B8G8R8A8_UNORM, so direct-render bytes are already native
+    // for SurfaceFlinger. bgraBytes is retained only for wire compatibility.
     AHardwareBuffer* ahb = buffers[msg.slotIndex];
     AHardwareBuffer_Desc desc{};
     AHardwareBuffer_describe(ahb, &desc);
@@ -376,7 +462,7 @@ bool DirectAHBCompositor::submitFrameLocked(const PresentMsg& msg, int acquireFe
     if (fnSetOnCommit && socketFd >= 0) {
         int callbackFd = dup(socketFd);
         if (callbackFd >= 0) {
-            auto* ctx = new CallbackContext{callbackFd, msg.slotIndex, MSG_TICK, 0};
+            auto* ctx = new CallbackContext{callbackFd, msg.slotIndex, MSG_TICK, 0, socketWriteMutex};
             reinterpret_cast<FnSetCallback>(fnSetOnCommit)(t, ctx, transactionCallback);
         }
     }
@@ -386,7 +472,7 @@ bool DirectAHBCompositor::submitFrameLocked(const PresentMsg& msg, int acquireFe
             if (callbackFd >= 0) {
                 const uint8_t displayed = fnSetOnCommit ? 0 : 1;
                 auto* ctx = new CallbackContext{callbackFd, static_cast<uint32_t>(oldSlot),
-                                                MSG_RELEASE, displayed};
+                                                MSG_RELEASE, displayed, socketWriteMutex};
                 reinterpret_cast<FnSetCallback>(fnSetOnComplete)(t, ctx, transactionCallback);
             } else {
                 releaseSlot(static_cast<uint32_t>(oldSlot), false);
@@ -418,11 +504,20 @@ void DirectAHBCompositor::receiverLoop() {
         }
         if (msg.type == MSG_REALLOC) {
             if (fenceFd >= 0) close(fenceFd);
-            ReleaseMsg ack{};
-            ack.type = MSG_REALLOC_ACK;
-            ack.slotIndex = 0; // unsupported geometry: guest layer falls back safely.
-            ack.releaseFd = -1;
-            (void)send(socketFd, &ack, sizeof(ack), MSG_NOSIGNAL);
+            const int width = static_cast<int>(msg.slotIndex);
+            const int height = msg.dstX;
+            const int count = msg.dstY;
+            if (!reallocateBuffersLocked(width, height, count)) {
+                if (running.load(std::memory_order_acquire) && socketFd >= 0) {
+                    ReleaseMsg ack{};
+                    ack.type = MSG_REALLOC_ACK;
+                    ack.slotIndex = 0;
+                    ack.releaseFd = -1;
+                    std::lock_guard<std::mutex> writeLock(*socketWriteMutex);
+                    (void)send(socketFd, &ack, sizeof(ack), MSG_NOSIGNAL);
+                }
+                DLOGW("dynamic AHB pool realloc failed: %dx%d x %d", width, height, count);
+            }
             continue;
         }
         if (msg.type != MSG_PRESENT) {
@@ -449,7 +544,7 @@ void DirectAHBCompositor::hideAndReleaseCurrentLocked() {
                 int callbackFd = dup(socketFd);
                 if (callbackFd >= 0) {
                     auto* ctx = new CallbackContext{callbackFd, static_cast<uint32_t>(currentSlot),
-                                                    MSG_RELEASE, 0};
+                                                    MSG_RELEASE, 0, socketWriteMutex};
                     reinterpret_cast<FnSetCallback>(fnSetOnComplete)(t, ctx, transactionCallback);
                 }
                 currentSlot = -1;

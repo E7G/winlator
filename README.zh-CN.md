@@ -3,6 +3,22 @@
 这是基于 **Winlator Ludashi 3.1** 的可维护整合分支，目标是保留 3.1 的新渲染/输入/存储修复，同时吸收 Ludashi Plus 中仍然适用于 3.1 的优化思路，并提供中文界面、可复现构建和自动 Release。
 
 
+## 3.1-E7G.4：端到端 DXVK AHB + Proton 11
+
+- **端到端 DXVK AHB Direct Render**：DXVK 的 gameplay swapchain 直接使用 AHardwareBuffer-backed VkImage，渲染完成后通过 SYNC_FD 交给 SurfaceFlinger；命中时不再经过 Winlator Vulkan 合成，也不需要中间 blit。
+- **动态 AHB swapchain pool**：游戏运行中改变分辨率时可重建 2–4 个 AHB 并把新 handles 返回 DXVK Layer，不再因为分辨率不同直接失去 DAC。
+- **三级自动回退**：端到端 DXVK AHB → DRI3 AHB 直出 → 3.1 VulkanRenderer，兼容性优先。
+- **Vulkan Layer 每次 CI 现编**：移除旧预编译 `libahb_layer.so`，避免 Java/native 协议和 APK 内二进制版本漂移。
+- **内置 Proton 更新到 11.0-2 ARM64EC SDK28**：GitHub Actions 固定 release tag + SHA-256，构建时将 WCP 正规化成离线内置 Wine 资产。
+- 在线内容源同时提供 **Proton 11.0-2 SDK28/35** 与 **GE-Proton11-5 SDK28/35**。
+
+启用端到端模式需要同时打开：
+
+1. 全局设置里的 **端到端 DXVK AHB Direct Render（实验）**；
+2. 当前容器/快捷方式渲染器选项里的 **Native Rendering+（AHB 直出）**。
+
+详细原理、回退条件和调试方法见 [极致性能模式与 AHB Direct Render](docs/PERFORMANCE.zh-CN.md)。
+
 ## 3.1-E7G.3 极致性能增强
 
 - **Native Rendering+（AHB 直出）**：符合条件的 DRI3 AHardwareBuffer 帧直接提交给 SurfaceFlinger，绕过 Winlator Vulkan 合成与 swapchain present；不兼容场景自动回退原 VulkanRenderer。

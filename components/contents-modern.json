@@ -52,5 +52,29 @@
     "verName": "vkd3d-proton-arm64ec-3.0.1",
     "verCode": 0,
     "remoteUrl": "https://github.com/The412Banner/Nightlies/releases/download/VKD3D-PROTON-ARM/vkd3d-proton-arm64ec-3.0.1.wcp"
+  },
+  {
+    "type": "Proton",
+    "verName": "proton-11.0-2-arm64ec-unixlibs-sdk28",
+    "verCode": 1,
+    "remoteUrl": "https://github.com/The412Banner/proton-wine/releases/download/build-p11-20260821/proton-11.0-2-arm64ec-sdk28.wcp"
+  },
+  {
+    "type": "Proton",
+    "verName": "proton-11.0-2-arm64ec-unixlibs-sdk35",
+    "verCode": 1,
+    "remoteUrl": "https://github.com/The412Banner/proton-wine/releases/download/build-p11-20260821/proton-11.0-2-arm64ec-sdk35.wcp"
+  },
+  {
+    "type": "Proton",
+    "verName": "ge-proton-11.0-5-arm64ec-sdk28",
+    "verCode": 1,
+    "remoteUrl": "https://github.com/The412Banner/proton-wine/releases/download/build-bionic-layers-20260819-vmem/GE-proton-11.0-5-arm64ec-sdk28.wcp"
+  },
+  {
+    "type": "Proton",
+    "verName": "ge-proton-11.0-5-arm64ec-sdk35",
+    "verCode": 1,
+    "remoteUrl": "https://github.com/The412Banner/proton-wine/releases/download/build-bionic-layers-20260819-vmem/GE-proton-11.0-5-arm64ec-sdk35.wcp"
   }
 ]

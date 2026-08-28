@@ -43,13 +43,77 @@ public abstract class ImageFsInstaller {
 
     public static boolean installWineArchive(final Context context, String version, File archiveFile) {
         File rootDir = ImageFs.find(context).getRootDir();
-        File outFile = new File(rootDir, "opt/" + version);
+        File optDir = new File(rootDir, "opt");
+        optDir.mkdirs();
+
+        File outFile = new File(optDir, version);
+        File staging = new File(optDir, ".install-" + version);
         FileUtils.delete(outFile);
-        outFile.mkdirs();
-        boolean success = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, archiveFile, outFile);
-        if (!success) success = TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archiveFile, outFile);
-        if (!success) FileUtils.delete(outFile);
-        return success;
+        FileUtils.delete(staging);
+        staging.mkdirs();
+
+        boolean success = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, archiveFile, staging);
+        if (!success) success = TarCompressorUtils.extract(TarCompressorUtils.Type.XZ, archiveFile, staging);
+        if (!success) {
+            FileUtils.delete(staging);
+            return false;
+        }
+
+        try {
+            File profileFile = new File(staging, "profile.json");
+            if (profileFile.isFile()) {
+                JSONObject profile = new JSONObject(FileUtils.readString(profileFile));
+                JSONObject wine = profile.getJSONObject("wine");
+                String binPath = wine.getString("binPath");
+                String prefixPath = wine.optString("prefixPack", "");
+
+                File binDir = new File(staging, binPath).getCanonicalFile();
+                File stagingCanonical = staging.getCanonicalFile();
+                if (!binDir.isDirectory() ||
+                        !binDir.getPath().startsWith(stagingCanonical.getPath() + File.separator)) {
+                    FileUtils.delete(staging);
+                    return false;
+                }
+
+                File runtimeRoot = binDir.getParentFile();
+                if (runtimeRoot == null || !runtimeRoot.isDirectory()) {
+                    FileUtils.delete(staging);
+                    return false;
+                }
+
+                if (!prefixPath.isEmpty()) {
+                    File prefixPack = new File(staging, prefixPath).getCanonicalFile();
+                    if (prefixPack.isFile() &&
+                            prefixPack.getPath().startsWith(stagingCanonical.getPath() + File.separator)) {
+                        File normalizedPrefix = new File(runtimeRoot, "prefixPack.txz");
+                        if (!prefixPack.equals(normalizedPrefix) && !FileUtils.copy(prefixPack, normalizedPrefix)) {
+                            FileUtils.delete(staging);
+                            return false;
+                        }
+                    }
+                }
+
+                // Same filesystem: rename preserves Wine symlinks, executable bits and layout.
+                if (!runtimeRoot.renameTo(outFile)) {
+                    FileUtils.delete(staging);
+                    FileUtils.delete(outFile);
+                    return false;
+                }
+                FileUtils.delete(staging);
+                return new File(outFile, "bin").isDirectory();
+            }
+
+            // Legacy .tar.zst/.txz packages are already rooted at bin/, lib/, ...
+            if (!staging.renameTo(outFile)) {
+                FileUtils.delete(staging);
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            FileUtils.delete(staging);
+            FileUtils.delete(outFile);
+            return false;
+        }
     }
 
     public static void installWineFromAssets(final DownloadProgressDialog dialog, final MainActivity activity) {
@@ -61,6 +125,7 @@ public abstract class ImageFsInstaller {
 
         for (String version : versions) {
             File outFile = new File(rootDir, "opt/" + version);
+            FileUtils.delete(outFile);
             outFile.mkdirs();
             final long contentLength = (long)(FileUtils.getSize(activity, version + ".tar.zst") * (100.0f / compressionRatio));
             AtomicLong totalSizeRef = new AtomicLong();
@@ -138,12 +203,29 @@ public abstract class ImageFsInstaller {
 
     public static boolean installIfNeeded(final MainActivity activity, onInstallationFinish callback) {
         ImageFs imageFs = ImageFs.find(activity);
-        
+
         if (!imageFs.isValid() || imageFs.getVersion() < LATEST_VERSION) {
             installFromAssets(activity, callback);
             return true;
-        }    
-        
+        }
+
+        // App upgrades should add the new bundled Proton without wiping an
+        // existing imagefs or legacy Proton used by older containers.
+        File mainWine = new File(imageFs.getRootDir(), "opt/" + WineInfo.MAIN_WINE_VERSION.identifier());
+        File[] mainFiles = mainWine.listFiles();
+        if (!mainWine.isDirectory() || mainFiles == null || mainFiles.length == 0) {
+            final DownloadProgressDialog dialog = new DownloadProgressDialog(activity);
+            dialog.show(R.string.installing_wine_files);
+            Executors.newSingleThreadExecutor().execute(() -> {
+                installWineFromAssets(dialog, activity);
+                dialog.closeOnUiThread();
+                activity.runOnUiThread(() -> {
+                    if (callback != null) callback.call();
+                });
+            });
+            return true;
+        }
+
         return false;
     }
 

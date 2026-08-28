@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -70,8 +71,12 @@ private:
     void receiverLoop();
     bool receivePresent(PresentMsg& msg, int& receivedFenceFd);
     void applyCursorLocked();
+    void releaseBuffersLocked();
+    bool reallocateBuffersLocked(int width, int height, int count);
+    bool sendReallocAckAndBuffersLocked(const std::vector<AHardwareBuffer*>& newBuffers);
 
     std::mutex mutex;
+    std::shared_ptr<std::mutex> socketWriteMutex = std::make_shared<std::mutex>();
     std::atomic<bool> running{false};
     std::atomic<bool> presenting{false};
     std::thread receiverThread;
