@@ -60,6 +60,54 @@ Native Rendering+ 是 opt-in，但不是“强制直出”。以下场景会自�
 
 3.1-E7G.3 的 `DirectAHBCompositor` 使用单独的 SurfaceControl cursor layer。游戏帧直出时，X11/Wine 光标仍可更新位置、热点和可见性，不需要为了 DAC 隐藏鼠标。
 
+## 3.1-E7G.5：Universal Super Resolution
+
+新增两个 Snapdragon GSR 空间超分档位：
+
+- **SGSR 性能**：原有单 pass 路径，优先吞吐、功耗和低延迟。
+- **SGSR 高画质（Edge Direction）**：加入 Qualcomm 公开 edge-direction 权重模型，对斜线、几何边缘和高频细节的重建更稳定。
+
+推荐用途：
+
+- 720p/800p -> 1080p/1200p：优先 **高画质**。
+- 540p/600p -> 1080p：先试高画质，GPU 压力较大时切 **性能**。
+- 像素游戏/复古 UI：使用最近邻，不建议超分。
+- 原生分辨率：双线性或关闭额外超分，避免无意义锐化。
+
+### 为什么没有把 SGSR2 作为“通用滤镜”
+
+SGSR2 是时域 TAAU，需要：
+
+- 当前低分辨率 color；
+- depth；
+- motion vector；
+- 前一帧历史。
+
+这些输入属于游戏引擎内部渲染资源，并不存在于 Winlator 最终窗口合成器的统一接口里。只拿最终 RGB 帧强行套 SGSR2 会失去正确 reprojection 条件，容易产生 ghosting/flicker，因此 3.1-E7G.5 选择官方 SGSR1 edge-direction 作为目前可安全通用的最高画质方案。
+
+### 和 AHB Direct 的关系
+
+AHB Direct 的性能来自绕过 VulkanRenderer 合成；超分本质上需要采样低分辨率输入并生成高分辨率输出，所以二者不能同时保持“零额外 pass”。
+
+当滤镜模式不是 Bilinear 时：
+
+```
+DXVK / Wine frame
+  -> AHB/texture import
+  -> SGSR spatial reconstruction
+  -> VulkanRenderer swapchain
+  -> display
+```
+
+关闭超分后，满足条件的容器仍可恢复：
+
+```
+DXVK AHB direct
+  -> SurfaceFlinger
+  -> display
+```
+
+
 ## 3.1-E7G.4：端到端 DXVK AHB Direct Render
 
 3.1-E7G.4 在上一版 DRI3 AHB 直出的基础上继续向前移动生产端：DXVK gameplay swapchain 本身可以由 AHardwareBuffer-backed VkImage 组成。
