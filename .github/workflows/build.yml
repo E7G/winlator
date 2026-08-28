@@ -167,6 +167,7 @@ jobs:
           - Bundled Proton 11.0-2 ARM64EC SDK28
           - Root extreme performance mode retained
           - Snapdragon GSR quality spatial upscaling with edge-direction reconstruction
+          - Proton 11 is the actual bundled/default compatibility layer; startup reinstall loop fixed
           APK is a debug-signed installable build produced by GitHub Actions."
 
           if gh release view "$TAG" >/dev/null 2>&1; then
