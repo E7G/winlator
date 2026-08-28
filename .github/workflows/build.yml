@@ -7,6 +7,7 @@ on:
       - integration/ludashi-3.1-plus
       - feature/dac-ahb-root-perf
       - feature/end-to-end-dxvk-ahb-proton11
+      - feature/universal-super-resolution
   pull_request:
     branches:
       - main
@@ -165,6 +166,7 @@ jobs:
           - Dynamic AHB swapchain pool reallocation and Vulkan/DRI3 fallback
           - Bundled Proton 11.0-2 ARM64EC SDK28
           - Root extreme performance mode retained
+          - Snapdragon GSR quality spatial upscaling with edge-direction reconstruction
           APK is a debug-signed installable build produced by GitHub Actions."
 
           if gh release view "$TAG" >/dev/null 2>&1; then
