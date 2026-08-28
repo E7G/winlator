@@ -688,4 +688,9 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="direct_ahb_compositor_summary">With Native Rendering+ enabled for the container, DXVK renders directly into AHardwareBuffer swapchain images and presents them to SurfaceFlinger. Falls back automatically when unsupported.</string>
     <string name="native_rendering_plus">Native Rendering+ (AHB direct)</string>
     <string name="native_rendering_plus_summary">Directly presents eligible DRI3 AHardwareBuffer frames through SurfaceFlinger. Automatically falls back to Vulkan when unsupported.</string>
+    <string name="renderer_filter_bilinear">Bilinear</string>
+    <string name="renderer_filter_nearest">Nearest neighbor</string>
+    <string name="renderer_filter_sgsr_performance">Snapdragon GSR · Performance</string>
+    <string name="renderer_filter_sgsr_quality">Snapdragon GSR · Quality (Edge Direction)</string>
+    <string name="renderer_filter_summary">Quality mode uses Qualcomm SGSR edge-direction spatial upscaling. Super resolution requires the Vulkan compositor, so AHB Direct Render is automatically bypassed while enabled.</string>
 </resources>
