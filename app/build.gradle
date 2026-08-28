@@ -83,8 +83,8 @@ android {
         // We’re preserving Winlator’s request to keep targetSdkVersion at 28
         targetSdkVersion 28
 
-        versionCode 25
-        versionName "3.1-E7G.5"
+        versionCode 26
+        versionName "3.1-E7G.6"
 
         // External native build from Winlator
         externalNativeBuild {
