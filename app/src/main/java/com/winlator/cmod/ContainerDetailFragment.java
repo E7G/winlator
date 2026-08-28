@@ -1345,6 +1345,8 @@ public class ContainerDetailFragment extends Fragment implements DXVKConfigDialo
         sWineVersion.setPopupBackgroundResource(R.drawable.dialog_background_dark_blue);
         if (isEditMode())
             AppUtils.setSpinnerSelectionFromValue(sWineVersion, container.getWineVersion());
+        else
+            AppUtils.setSpinnerSelectionFromValue(sWineVersion, WineInfo.MAIN_WINE_VERSION.identifier());
     }
 
     private void showWineVersionDownloadPopup(View anchor, Spinner sWineVersion, Runnable refreshAction) {
