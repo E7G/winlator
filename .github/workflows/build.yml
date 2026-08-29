@@ -56,12 +56,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y glslang-tools zstd xz-utils jq
 
-      - name: Prepare bundled Proton 11 ARM64EC
+      - name: Prepare bundled GameNative Proton 11 ARM64EC
         shell: bash
         env:
-          PROTON_ID: proton-11.0-2-arm64ec
-          PROTON_WCP_URL: https://github.com/The412Banner/proton-wine/releases/download/build-p11-20260821/proton-11.0-2-arm64ec-sdk28.wcp
-          PROTON_WCP_SHA256: 23ae9d8ff61b4a3fc619bffc3e6ba810e89cb33bb319af29f8e4320e59f3259d
+          PROTON_ID: proton-11.0-2.20260829-arm64ec
+          PROTON_WCP_URL: https://github.com/GameNative/proton-wine/releases/download/proton-11.0-2-20260829/proton-wine-11.0-2-arm64ec.wcp.xz
+          PROTON_WCP_SHA256: f3775cbd579203faf041c170906234586ad47159507b491335f9a78c5b531edf
         run: |
           set -euxo pipefail
           TMP="$(mktemp -d)"
@@ -164,7 +164,8 @@ jobs:
           Highlights:
           - End-to-end DXVK AHardwareBuffer Direct Render with SurfaceFlinger presentation
           - Dynamic AHB swapchain pool reallocation and Vulkan/DRI3 fallback
-          - Bundled Proton 11.0-2 ARM64EC SDK28
+          - Bundled GameNative Proton 11.0-2 ARM64EC (2026-08-29 test build)
+          - Userspace ntsync-android with dead-process object auto-sweep
           - Root extreme performance mode retained
           - Snapdragon GSR quality spatial upscaling with edge-direction reconstruction
           - Proton 11 is the actual bundled/default compatibility layer; startup reinstall loop fixed

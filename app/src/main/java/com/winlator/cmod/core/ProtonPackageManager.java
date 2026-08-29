@@ -15,8 +15,8 @@ import java.util.Arrays;
 import java.util.List;
 
 public abstract class ProtonPackageManager {
-    public static final String DEFAULT_IDENTIFIER = "proton-11.0-2-arm64ec";
-    private static final String RELEASE_BASE_URL = "https://github.com/Other-backup/winlator-imagefs/releases/download/protons-zst-latest/";
+    public static final String DEFAULT_IDENTIFIER = "proton-11.0-2.20260829-arm64ec";
+    private static final String RELEASE_BASE_URL = "https://github.com/Other-backup/winlator-imagefs-v2/releases/download/protons-zst-latest/";
 
     public static class PackageInfo {
         public final String identifier;
@@ -40,19 +40,22 @@ public abstract class ProtonPackageManager {
 
     private static final List<PackageInfo> PACKAGES = Arrays.asList(
             new PackageInfo(
-                    "proton-11.0-2-arm64ec",
-                    "Proton 11.0-2 ARM64EC (SDK28)",
-                    "proton-11.0-2-arm64ec-sdk28.wcp",
-                    new long[]{95031047L},
-                    "https://github.com/The412Banner/proton-wine/releases/download/build-p11-20260821/proton-11.0-2-arm64ec-sdk28.wcp"),
+                    "proton-11.0-2.20260829-arm64ec",
+                    "Proton 11.0-2 ARM64EC (GameNative 20260829)",
+                    "proton-wine-11.0-2-arm64ec.wcp.xz",
+                    new long[]{88573668L},
+                    "https://github.com/GameNative/proton-wine/releases/download/proton-11.0-2-20260829/proton-wine-11.0-2-arm64ec.wcp.xz"),
             new PackageInfo(
                     "proton-11.0-5-arm64ec-ge",
                     "GE-Proton 11.0-5 ARM64EC (SDK28)",
                     "GE-proton-11.0-5-arm64ec-sdk28.wcp",
                     new long[]{92947083L},
                     "https://github.com/The412Banner/proton-wine/releases/download/build-bionic-layers-20260819-vmem/GE-proton-11.0-5-arm64ec-sdk28.wcp"),
-            new PackageInfo("proton-10-arm64ec", "Proton 10 arm64ec", "proton-10-arm64ec.tar.zst", new long[]{52428800L, 52428800L, 52428800L, 52428800L, 7195940L}),
-            new PackageInfo("proton-9.0-arm64ec", "Proton 9 arm64ec (legacy)", "proton-9.0-arm64ec.tar.zst", new long[]{52428800L, 14659103L})
+            new PackageInfo(
+                    "proton-9.0-arm64ec",
+                    "Proton 9 ARM64EC (Winlator legacy)",
+                    "proton-9.0-arm64ec.tar.zst",
+                    new long[]{52428800L, 14659103L})
     );
 
     public static List<PackageInfo> getPackages() {
