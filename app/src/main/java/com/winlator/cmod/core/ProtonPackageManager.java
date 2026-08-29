@@ -45,6 +45,12 @@ public abstract class ProtonPackageManager {
                     "proton-11.0-2-arm64ec-sdk28.wcp",
                     new long[]{95031047L},
                     "https://github.com/The412Banner/proton-wine/releases/download/build-p11-20260821/proton-11.0-2-arm64ec-sdk28.wcp"),
+            new PackageInfo(
+                    "proton-11.0-5-arm64ec-ge",
+                    "GE-Proton 11.0-5 ARM64EC (SDK28)",
+                    "GE-proton-11.0-5-arm64ec-sdk28.wcp",
+                    new long[]{92947083L},
+                    "https://github.com/The412Banner/proton-wine/releases/download/build-bionic-layers-20260819-vmem/GE-proton-11.0-5-arm64ec-sdk28.wcp"),
             new PackageInfo("proton-10-arm64ec", "Proton 10 arm64ec", "proton-10-arm64ec.tar.zst", new long[]{52428800L, 52428800L, 52428800L, 52428800L, 7195940L}),
             new PackageInfo("proton-9.0-arm64ec", "Proton 9 arm64ec (legacy)", "proton-9.0-arm64ec.tar.zst", new long[]{52428800L, 14659103L})
     );
