@@ -46,12 +46,6 @@ public abstract class ProtonPackageManager {
                     new long[]{88573668L},
                     "https://github.com/GameNative/proton-wine/releases/download/proton-11.0-2-20260829/proton-wine-11.0-2-arm64ec.wcp.xz"),
             new PackageInfo(
-                    "proton-11.0-5-arm64ec-ge",
-                    "GE-Proton 11.0-5 ARM64EC (SDK28)",
-                    "GE-proton-11.0-5-arm64ec-sdk28.wcp",
-                    new long[]{92947083L},
-                    "https://github.com/The412Banner/proton-wine/releases/download/build-bionic-layers-20260819-vmem/GE-proton-11.0-5-arm64ec-sdk28.wcp"),
-            new PackageInfo(
                     "proton-9.0-arm64ec",
                     "Proton 9 ARM64EC (Winlator legacy)",
                     "proton-9.0-arm64ec.tar.zst",
