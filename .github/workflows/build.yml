@@ -165,7 +165,7 @@ jobs:
           - End-to-end DXVK AHardwareBuffer Direct Render with SurfaceFlinger presentation
           - Dynamic AHB swapchain pool reallocation and Vulkan/DRI3 fallback
           - Bundled GameNative Proton 11.0-2 ARM64EC (2026-08-29 test build)
-          - Userspace ntsync-android with dead-process object auto-sweep
+          - GameNative userspace ntsync runtime retained\n          - Test2: bundled P11 forces PROTON_NO_NTSYNC=1, WINEFSYNC=0, WINEESYNC=0 to isolate loading hangs
           - Root extreme performance mode retained
           - Snapdragon GSR quality spatial upscaling with edge-direction reconstruction
           - Proton 11 is the actual bundled/default compatibility layer; startup reinstall loop fixed

@@ -1036,7 +1036,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 envVars.put("WINE_CPU_TOPOLOGY", wineCpuTopologyValue);
             }
 
-            if (!envVars.has("WINEESYNC")) {
+            // E7G P11 sync-isolation test: the current GameNative Proton 11
+            // normally enables userspace ntsync automatically. Force the bundled
+            // main runtime onto plain wineserver synchronization so we can tell
+            // whether the loading hang is caused by any fast-sync backend.
+            if (WineInfo.isMainWineVersion(container.getWineVersion())) {
+                envVars.put("PROTON_NO_NTSYNC", "1");
+                envVars.put("WINEFSYNC", "0");
+                envVars.put("WINEESYNC", "0");
+            }
+            else if (!envVars.has("WINEESYNC")) {
                 envVars.put("WINEESYNC", "1");
             }
 
