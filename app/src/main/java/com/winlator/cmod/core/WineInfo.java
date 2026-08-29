@@ -133,12 +133,6 @@ public class WineInfo implements Parcelable {
                 identifier = identifier.substring(0, versionCodeSeparator).toLowerCase();
         }
 
-        // Community GE ARM64EC profiles use "ge-proton-..." while the runtime
-        // semantics are still Proton. Normalize the label but preserve the
-        // profile install directory selected above.
-        if (identifier.startsWith("ge-proton-"))
-            identifier = "proton-" + identifier.substring("ge-proton-".length());
-
         Matcher matcher = pattern.matcher(identifier);
 
         if (matcher.find()) {
