@@ -48,14 +48,14 @@ public class DriverDownloadDialog {
 
     public void show() {
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle("可用驱动"); // English
+        builder.setTitle("可用驱动");
 
         recyclerView = new RecyclerView(context);
         recyclerView.setBackgroundColor(Color.BLACK);
         recyclerView.setLayoutManager(new LinearLayoutManager(context));
 
         builder.setView(recyclerView);
-        builder.setNegativeButton("Back", null); // English
+        builder.setNegativeButton("返回", null);
 
         dialog = builder.create();
         dialog.show();
@@ -67,26 +67,23 @@ public class DriverDownloadDialog {
     private void fetchDrivers() {
         Executors.newSingleThreadExecutor().execute(() -> {
             String jsonStr = Downloader.downloadString(repoUrl);
-            
+
             if (jsonStr == null) {
-                runOnUi(() -> Toast.makeText(context, "Connection failed!", Toast.LENGTH_SHORT).show());
+                runOnUi(() -> Toast.makeText(context, "连接失败！", Toast.LENGTH_SHORT).show());
                 return;
             }
 
             List<ReleaseItem> releases = new ArrayList<>();
             try {
                 JSONArray array = new JSONArray(jsonStr);
-                
+
                 for (int i = 0; i < array.length(); i++) {
                     JSONObject releaseObj = array.getJSONObject(i);
-                    
-                    
-                    String rawName = releaseObj.optString("name", releaseObj.optString("tag_name", "Unknown Driver"));
+
+                    String rawName = releaseObj.optString("name", releaseObj.optString("tag_name", "未知驱动"));
                     String cleanName = cleanDriverName(rawName);
-                    
                     String description = releaseObj.optString("body", "");
-                    
-                    
+
                     List<DriverAsset> assets = new ArrayList<>();
                     if (releaseObj.has("assets")) {
                         JSONArray assetsArr = releaseObj.getJSONArray("assets");
@@ -94,13 +91,12 @@ public class DriverDownloadDialog {
                             JSONObject asset = assetsArr.getJSONObject(j);
                             String url = asset.getString("browser_download_url");
                             String filename = asset.optString("name", "driver.zip");
-                            
+
                             if (url.endsWith(".zip") || url.endsWith(".tzst")) {
                                 assets.add(new DriverAsset(filename, url));
                             }
                         }
                     } else if (releaseObj.has("url")) {
-                        
                         assets.add(new DriverAsset(cleanName + ".zip", releaseObj.getString("url")));
                     }
 
@@ -116,40 +112,34 @@ public class DriverDownloadDialog {
         });
     }
 
-    
     private String cleanDriverName(String raw) {
-    
         String clean = raw.replace("Mesa Turnip driver ", "")
-                          .replace("Mesa Turnip ", "")
-                          .replace("Qualcomm Driver ", "");
+                .replace("Mesa Turnip ", "")
+                .replace("Qualcomm Driver ", "");
         return clean.trim();
     }
 
     private void onDownloadClick(ReleaseItem item) {
         if (item.assets.isEmpty()) return;
 
-    
         if (item.assets.size() == 1) {
             startDownload(item.assets.get(0));
         } else {
-            
             String[] assetNames = new String[item.assets.size()];
             for (int i = 0; i < item.assets.size(); i++) {
                 assetNames[i] = item.assets.get(i).name;
             }
 
             new AlertDialog.Builder(context)
-                .setTitle("选择版本")
-                .setItems(assetNames, (dialogInterface, which) -> {
-                    startDownload(item.assets.get(which));
-                })
-                .show();
+                    .setTitle("选择版本")
+                    .setItems(assetNames, (dialogInterface, which) -> startDownload(item.assets.get(which)))
+                    .show();
         }
     }
 
     private void startDownload(DriverAsset asset) {
-        Toast.makeText(context, "Downloading " + asset.name + "...", Toast.LENGTH_SHORT).show();
-        
+        Toast.makeText(context, "正在下载 " + asset.name + "…", Toast.LENGTH_SHORT).show();
+
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
                 File tmpFile = new File(context.getCacheDir(), "driver_temp.zip");
@@ -162,68 +152,75 @@ public class DriverDownloadDialog {
                     runOnUi(() -> {
                         String installedName = adrenotoolsManager.installDriver(fileUri);
                         if (!installedName.isEmpty()) {
-                            Toast.makeText(context, "Installed: " + installedName, Toast.LENGTH_SHORT).show();
+                            Toast.makeText(context, "已安装：" + installedName, Toast.LENGTH_SHORT).show();
                             if (onDismissCallback != null) onDismissCallback.run();
                         } else {
-                            Toast.makeText(context, "Installation failed! Invalid ZIP.", Toast.LENGTH_LONG).show();
+                            Toast.makeText(context, "安装失败：ZIP 文件无效。", Toast.LENGTH_LONG).show();
                         }
                         tmpFile.delete();
                     });
                 } else {
-                    runOnUi(() -> Toast.makeText(context, "Download failed!", Toast.LENGTH_SHORT).show());
+                    runOnUi(() -> Toast.makeText(context, "下载失败！", Toast.LENGTH_SHORT).show());
                 }
             } catch (Exception e) {
                 e.printStackTrace();
+                runOnUi(() -> Toast.makeText(context, "下载失败！", Toast.LENGTH_SHORT).show());
             }
         });
     }
 
     private void setupAdapter(List<ReleaseItem> releases) {
         if (releases.isEmpty()) {
-            Toast.makeText(context, "No drivers found.", Toast.LENGTH_LONG).show();
+            Toast.makeText(context, "未找到可用驱动。", Toast.LENGTH_LONG).show();
             return;
         }
         recyclerView.setAdapter(new DriverAdapter(releases));
     }
 
-    
     private static class ReleaseItem {
         String name, description;
         List<DriverAsset> assets;
-        ReleaseItem(String n, String d, List<DriverAsset> a) { name = n; description = d; assets = a; }
-    }
-    
-    private static class DriverAsset {
-        String name, url;
-        DriverAsset(String n, String u) { name = n; url = u; }
+
+        ReleaseItem(String n, String d, List<DriverAsset> a) {
+            name = n;
+            description = d;
+            assets = a;
+        }
     }
 
-    
+    private static class DriverAsset {
+        String name, url;
+
+        DriverAsset(String n, String u) {
+            name = n;
+            url = u;
+        }
+    }
+
     private class DriverAdapter extends RecyclerView.Adapter<DriverAdapter.ViewHolder> {
         private final List<ReleaseItem> list;
-        public DriverAdapter(List<ReleaseItem> list) { this.list = list; }
+
+        public DriverAdapter(List<ReleaseItem> list) {
+            this.list = list;
+        }
 
         @Override
         public ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-            View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.adrenotools_list_item, parent, false); 
+            View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.adrenotools_list_item, parent, false);
             return new ViewHolder(v);
         }
 
         @Override
         public void onBindViewHolder(ViewHolder holder, int position) {
             ReleaseItem item = list.get(position);
-            
-            
             holder.title.setText(item.name);
-            
-            
+
             if (item.assets.size() > 1) {
-                holder.subtitle.setText(item.assets.size() + " variants available (Click to choose)");
+                holder.subtitle.setText(item.assets.size() + " 个版本可用（点击选择）");
             } else {
-                
                 String shortDesc = item.description.replace("\n", " ").trim();
-                if (shortDesc.length() > 50) shortDesc = shortDesc.substring(0, 50) + "...";
-                if (shortDesc.isEmpty()) shortDesc = "No description";
+                if (shortDesc.length() > 50) shortDesc = shortDesc.substring(0, 50) + "…";
+                if (shortDesc.isEmpty()) shortDesc = "暂无说明";
                 holder.subtitle.setText(shortDesc);
             }
 
@@ -232,11 +229,14 @@ public class DriverDownloadDialog {
         }
 
         @Override
-        public int getItemCount() { return list.size(); }
+        public int getItemCount() {
+            return list.size();
+        }
 
         class ViewHolder extends RecyclerView.ViewHolder {
             TextView title, subtitle;
             ImageButton actionButton;
+
             ViewHolder(View v) {
                 super(v);
                 title = v.findViewById(R.id.TVName);
