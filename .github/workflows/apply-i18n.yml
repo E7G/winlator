@@ -28,6 +28,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/res
-          git commit -m "feat(i18n): fully localize Ludashi 4.0 XML UI"
+          git add app/src/main/res app/src/main/java
+          git commit -m "feat(i18n): fully localize Ludashi 4.0 UI"
           git push origin HEAD:sync/ludashi-4.0-zh
