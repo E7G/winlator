@@ -85,7 +85,7 @@ internal fun OnboardingRuntimeSelectionScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item {
-                Text("Choose environment", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                Text("选择运行环境", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
                 if (preparing) {
                     Spacer(Modifier.height(18.dp))
                     Surface(
@@ -95,7 +95,7 @@ internal fun OnboardingRuntimeSelectionScreen(
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("Preparing environment", fontWeight = FontWeight.SemiBold)
+                            Text("正在准备运行环境", fontWeight = FontWeight.SemiBold)
                             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         }
                     }
@@ -142,14 +142,14 @@ internal fun OnboardingRuntimeSelectionScreen(
                     modifier = Modifier.weight(1f).height(48.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Back")
+                    Text("返回")
                 }
                 Button(
                     onClick = { if (selected.isNotBlank() && !preparing) onContinue(selected) },
                     enabled = selected.isNotBlank() && !preparing,
                     modifier = Modifier.weight(1f).height(48.dp),
                     shape = RoundedCornerShape(12.dp)
-                ) { Text(if (preparing) "Preparing…" else "Continue") }
+                ) { Text(if (preparing) "正在准备…" else "继续") }
             }
         }
     }

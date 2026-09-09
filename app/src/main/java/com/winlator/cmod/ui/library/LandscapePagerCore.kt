@@ -174,7 +174,7 @@ internal fun LandscapePagerCore(
                             color = Color.White.copy(.20f),
                             contentColor = Color.White,
                             border = BorderStroke(1.dp, Color.White.copy(.22f))
-                        ) { Text("View details", Modifier.padding(horizontal = 21.dp, vertical = 11.dp)) }
+                        ) { Text("查看详情", Modifier.padding(horizontal = 21.dp, vertical = 11.dp)) }
                         Surface(
                             onClick = { callbacks.onRun(item.shortcutPath) },
                             modifier = Modifier.size(44.dp),

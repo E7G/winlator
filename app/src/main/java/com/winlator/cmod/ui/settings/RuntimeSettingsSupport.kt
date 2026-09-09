@@ -393,9 +393,9 @@ private fun settingFieldLabel(label: String): String = when (label) {
 }
 
 private fun settingChoiceEntries(label: String, entries: List<String>): List<String> =
-    if (label == "Graphics Driver") listOf("Zink", "Freedreno") else entries
+    if (label == "图形驱动") listOf("Zink", "Freedreno") else entries
 private fun settingChoiceSelected(label: String, selected: String): String =
-    if (label == "Graphics Driver" && selected.equals("wrapper", ignoreCase = true)) "Zink" else selected
+    if (label == "图形驱动" && selected.equals("wrapper", ignoreCase = true)) "Zink" else selected
 
 @Composable
 internal fun SettingsCard(content: @Composable () -> Unit) {
@@ -435,14 +435,14 @@ private fun WallpaperPreview() {
         if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
-                contentDescription = "Wallpaper preview",
+                contentDescription = "壁纸预览",
                 modifier = Modifier.fillMaxWidth().height(132.dp).clip(RoundedCornerShape(12.dp)),
                 contentScale = ContentScale.Crop
             )
         } else {
             Image(
                 painter = painterResource(R.drawable.wallpaper),
-                contentDescription = "Wallpaper preview",
+                contentDescription = "壁纸预览",
                 modifier = Modifier.fillMaxWidth().height(132.dp).clip(RoundedCornerShape(12.dp)),
                 contentScale = ContentScale.Crop
             )
@@ -502,7 +502,7 @@ internal fun SettingChoice(
                 }
             }
         }
-        if (label == "Desktop Background" && selected.equals("Image", ignoreCase = true)) {
+        if (label == "桌面背景" && selected.equals("图片", ignoreCase = true)) {
             WallpaperPreview()
         }
     }
@@ -606,7 +606,7 @@ internal fun SettingInstallChoice(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(selected.ifBlank { "Choose a version" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                    Text(selected.ifBlank { "选择版本" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                 }
                 Icon(Icons.Outlined.KeyboardArrowDown, null)
             }
@@ -623,7 +623,7 @@ internal fun SettingInstallChoice(
                     text = {
                         Column {
                             Text(value, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (available) 1f else .52f))
-                            if (!available) Text(if (busy) "Downloading…" else "Download", style = MaterialTheme.typography.labelSmall)
+                            if (!available) Text(if (busy) "正在下载…" else "下载", style = MaterialTheme.typography.labelSmall)
                         }
                     },
                     trailingIcon = {
@@ -685,7 +685,7 @@ internal fun SettingDriverChoice(
                     text = {
                         Column {
                             Text(option.label, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (option.installed) 1f else .52f))
-                            if (!option.installed) Text(if (busy) "Downloading…" else "Download", style = MaterialTheme.typography.labelSmall)
+                            if (!option.installed) Text(if (busy) "正在下载…" else "下载", style = MaterialTheme.typography.labelSmall)
                         }
                     },
                     trailingIcon = {

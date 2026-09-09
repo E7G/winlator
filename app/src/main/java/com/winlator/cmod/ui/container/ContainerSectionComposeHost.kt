@@ -365,7 +365,7 @@ private fun ContainerSectionScreen(
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     )
                 ) {
-                    Text("Save", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("保存", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -473,7 +473,7 @@ private fun ContainerSectionScreen(
                         2 -> {
                             ChoiceSetting(Icons.Outlined.VolumeUp, "Audio Driver", audio, audioEntries) { audio = it }
                             GroupDivider()
-                            InfoText("ALSA offers direct audio output. PulseAudio can improve compatibility in some applications.")
+                            InfoText("ALSA 提供直接音频输出；PulseAudio 可提升部分应用的兼容性。")
                         }
                         else -> {
                             ChoiceSetting(Icons.Outlined.VerifiedUser, "DX Wrapper", wrapper, wrapperEntries) {
@@ -526,7 +526,7 @@ private fun ContainerSectionScreen(
                             GroupDivider()
                             ReadOnlySetting(
                                 icon = Icons.Outlined.Memory,
-                                label = "64-bit Emulator",
+                                label = "64 位模拟器",
                                 value = if (arm64EcWine) "FEXCore" else "Box64"
                             )
                             GroupDivider()
@@ -540,7 +540,7 @@ private fun ContainerSectionScreen(
                             } else {
                                 ReadOnlySetting(
                                     icon = Icons.Outlined.Memory,
-                                    label = "32-bit Emulator",
+                                    label = "32 位模拟器",
                                     value = "Box64"
                                 )
                             }
@@ -557,7 +557,7 @@ private fun ContainerSectionScreen(
                                 GroupDivider()
                                 IdChoiceSetting(
                                     icon = Icons.Outlined.Tune,
-                                    label = "FEXCore Preset",
+                                    label = "FEXCore 预设",
                                     selectedId = fexcorePreset,
                                     entries = fexcorePresetEntries,
                                     ids = fexcorePresetIds,
@@ -579,7 +579,7 @@ private fun ContainerSectionScreen(
                                 GroupDivider()
                                 IdChoiceSetting(
                                     icon = Icons.Outlined.Tune,
-                                    label = "Box64 Preset",
+                                    label = "Box64 预设",
                                     selectedId = box64Preset,
                                     entries = box64PresetEntries,
                                     ids = box64PresetIds,
@@ -821,14 +821,14 @@ private fun RendererOptionsPanel(
         Column(Modifier.padding(vertical = 4.dp)) {
             if (!nativeRenderer) {
                 InlineChoice(
-                    label = "Present Mode",
+                    label = "呈现模式",
                     selected = presentEntries[presentIds.indexOf(presentMode).coerceAtLeast(0)],
                     entries = presentEntries
                 ) { value -> onPresentMode(presentIds[presentEntries.indexOf(value)]) }
                 ThinDivider()
                 val selectedDriver = driverIds.indexOf(driverId).takeIf { it >= 0 } ?: 0
                 InlineChoice(
-                    label = "Renderer Driver",
+                    label = "渲染驱动",
                     selected = driverEntries.getOrElse(selectedDriver) { "System" },
                     entries = driverEntries
                 ) { value ->
@@ -838,7 +838,7 @@ private fun RendererOptionsPanel(
                 ThinDivider()
             }
             InlineChoice(
-                label = "Texture Filter",
+                label = "纹理过滤",
                 selected = filterEntries.getOrElse(filterMode) { filterEntries[0] },
                 entries = filterEntries
             ) { value -> onFilterMode(filterEntries.indexOf(value).coerceAtLeast(0)) }
@@ -847,7 +847,7 @@ private fun RendererOptionsPanel(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Swap red/blue channels", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                Text("交换红/蓝通道", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 Switch(checked = swapRB, onCheckedChange = onSwapRB)
             }
         }
@@ -887,7 +887,7 @@ private fun GraphicsDriverOptionsPanel(
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             ChoiceSetting(
                 icon = Icons.Outlined.DesktopWindows,
-                label = "Driver Version",
+                label = "驱动版本",
                 selected = version,
                 entries = versionEntries,
                 showIcon = false,
@@ -961,7 +961,7 @@ private fun WrapperOptionsPanel(
             if (dxvk) {
                 ChoiceSetting(
                     icon = Icons.Outlined.Memory,
-                    label = "DXVK Version",
+                    label = "DXVK 版本",
                     selected = dxvkVersion.ifBlank { dxvkEntries.firstOrNull().orEmpty() },
                     entries = dxvkEntries,
                     showIcon = false,
@@ -971,7 +971,7 @@ private fun WrapperOptionsPanel(
                 )
                 ChoiceSetting(
                     icon = Icons.Outlined.Memory,
-                    label = "VKD3D Version",
+                    label = "VKD3D 版本",
                     selected = vkd3dVersion.ifBlank { vkd3dEntries.firstOrNull().orEmpty() },
                     entries = vkd3dEntries,
                     showIcon = false,
@@ -980,13 +980,13 @@ private fun WrapperOptionsPanel(
                     onSelected = onVkd3dVersion
                 )
                 InlineChoice(
-                    label = "VKD3D Feature Level",
+                    label = "VKD3D 功能级别",
                     selected = vkd3dLevel,
                     entries = arrayOf("12_0", "12_1", "12_2", "11_1", "11_0", "10_1", "10_0", "9_3", "9_2", "9_1"),
                     onSelected = onVkd3dLevel
                 )
                 CompactTextField(
-                    label = "Frame Rate Limit",
+                    label = "帧率限制",
                     value = frameRate,
                     onValueChange = onFrameRate,
                     numeric = true
@@ -995,7 +995,7 @@ private fun WrapperOptionsPanel(
                 ToggleSetting("Async shaders", async, onAsync)
                 ToggleSetting("Async shader cache", asyncCache, onAsyncCache)
                 InlineChoice(
-                    label = "DDraw Wrapper",
+                    label = "DDraw 封装",
                     selected = ddrawWrapper,
                     entries = arrayOf("wined3d", "cnc-ddraw"),
                     onSelected = onDdrawWrapper
@@ -1004,19 +1004,19 @@ private fun WrapperOptionsPanel(
                 ToggleSetting("CSMT", csmt, onCsmt)
                 ToggleSetting("Strict Shader Math", strictShaderMath, onStrictShaderMath)
                 InlineChoice(
-                    label = "Offscreen Rendering",
+                    label = "离屏渲染",
                     selected = offscreenMode,
                     entries = arrayOf("fbo", "backbuffer"),
                     onSelected = onOffscreenMode
                 )
                 InlineChoice(
-                    label = "WineD3D Renderer",
+                    label = "WineD3D 渲染器",
                     selected = wineRenderer,
                     entries = arrayOf("gl", "vulkan", "gdi"),
                     onSelected = onWineRenderer
                 )
                 CompactTextField(
-                    label = "Video Memory (MB)",
+                    label = "显存（MB）",
                     value = videoMemory,
                     onValueChange = onVideoMemory,
                     numeric = true
@@ -1036,7 +1036,7 @@ private fun WrapperOptionsPanel(
                     Icon(Icons.Outlined.Memory, null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Manage installed versions", style = MaterialTheme.typography.titleSmall)
+                        Text("管理已安装版本", style = MaterialTheme.typography.titleSmall)
                         Text(
                             "Install or remove DXVK, VKD3D and emulator components",
                             style = MaterialTheme.typography.bodySmall,
@@ -1096,7 +1096,7 @@ private fun CustomResolutionFields(
             value = width,
             onValueChange = onWidth,
             modifier = Modifier.weight(1f),
-            label = { Text("Width") },
+            label = { Text("宽度") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             shape = RoundedCornerShape(10.dp)
@@ -1105,7 +1105,7 @@ private fun CustomResolutionFields(
             value = height,
             onValueChange = onHeight,
             modifier = Modifier.weight(1f),
-            label = { Text("Height") },
+            label = { Text("高度") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             shape = RoundedCornerShape(10.dp)

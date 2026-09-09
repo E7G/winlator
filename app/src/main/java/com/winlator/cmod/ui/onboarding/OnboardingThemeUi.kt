@@ -111,11 +111,11 @@ private fun ThemeNavigationButtons(
     ) {
         if (onBack != null) {
             OutlinedButton(onClick = onBack, modifier = Modifier.weight(1f)) {
-                Text("Back")
+                Text("返回")
             }
         }
         Button(onClick = onContinue, modifier = Modifier.weight(1f)) {
-            Text("Continue")
+            Text("继续")
         }
     }
 }

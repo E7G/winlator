@@ -446,7 +446,7 @@ internal fun ShortcutEditorV2(fragment: Fragment, shortcut: Shortcut, close: () 
         scope.launch {
             val installed = installRuntimeComponent(context, type, version)
             state.installing = state.installing - key
-            if (installed == null) Toast.makeText(context, "Unable to install $version", Toast.LENGTH_SHORT).show()
+            if (installed == null) Toast.makeText(context, "无法安装 $version", Toast.LENGTH_SHORT).show()
             else {
                 done(installed)
                 state.revision++
@@ -461,7 +461,7 @@ internal fun ShortcutEditorV2(fragment: Fragment, shortcut: Shortcut, close: () 
         scope.launch {
             val installed = installAdrenoDriver(context, option)
             state.installing = state.installing - key
-            if (installed == null) Toast.makeText(context, "Unable to install ${option.label}", Toast.LENGTH_SHORT).show()
+            if (installed == null) Toast.makeText(context, "无法安装 ${option.label}", Toast.LENGTH_SHORT).show()
             else {
                 state.driverVersion = installed
                 state.graphics("version", installed)
@@ -493,7 +493,7 @@ internal fun ShortcutEditorV2(fragment: Fragment, shortcut: Shortcut, close: () 
         val target = containers.firstOrNull { it.id == targetId } ?: return
         if (target.id == state.container.id) return
         if (shortcut.cloneToContainer(target)) {
-            Toast.makeText(context, "Shortcut copied to ${target.name}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "快捷方式已复制到 ${target.name}", Toast.LENGTH_SHORT).show()
             if (fragment is ShortcutsFragment) fragment.loadShortcutsList()
             close()
         }
@@ -642,7 +642,7 @@ private fun ShortcutCategoryV2(
 ) {
     when (category) {
         "General" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SettingsCard { SettingText("Name", s.name) { s.name = it } }
+            SettingsCard { SettingText("名称", s.name) { s.name = it } }
             SettingsCard {
                 val currentLabel = environmentLabel(s.container)
                 if (containers.size > 1) {
@@ -656,7 +656,7 @@ private fun ShortcutCategoryV2(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("Environment", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("运行环境", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(currentLabel, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                         }
                         IconButton(onClick = createContainer) { Icon(Icons.Outlined.Add, "Create container") }
@@ -666,7 +666,7 @@ private fun ShortcutCategoryV2(
                 Button(onClick = enterContainer, modifier = Modifier.fillMaxWidth().padding(12.dp)) {
                     Icon(Icons.Outlined.PlayArrow, null)
                     Spacer(Modifier.size(7.dp))
-                    Text("Enter container")
+                    Text("进入容器")
                 }
             }
             SettingsCard {
@@ -750,7 +750,7 @@ private fun ShortcutCategoryV2(
                 }
                 if (screenChoice == "Custom") {
                     SettingsDivider()
-                    SettingText("Custom resolution", s.screen) { value ->
+                    SettingText("自定义分辨率", s.screen) { value ->
                         s.screen = value
                         if (Regex("\\d{2,5}x\\d{2,5}").matches(value.trim())) s.extra("screenSize", normalizeResolution(value))
                     }
@@ -884,7 +884,7 @@ private fun ShortcutCategoryV2(
                     SettingsDivider()
                     SettingChoice("VKD3D Feature Level", s.vkd3dLevel, listOf("12_0", "12_1", "12_2", "11_1", "11_0", "10_1", "10_0", "9_3", "9_2", "9_1")) { s.vkd3dLevel = it; s.wrapperValue("vkd3dLevel", it) }
                     SettingsDivider()
-                    SettingText("Frame Rate", s.frameRate) { s.frameRate = it.filter(Char::isDigit).take(4); s.wrapperValue("framerate", s.frameRate.ifBlank { "0" }) }
+                    SettingText("帧率", s.frameRate) { s.frameRate = it.filter(Char::isDigit).take(4); s.wrapperValue("framerate", s.frameRate.ifBlank { "0" }) }
                     SettingsDivider()
                     SettingToggle("Max Frame Latency", s.maxFrameLatency) { s.maxFrameLatency = it; s.wrapperValue("maxFrameLatency", if (it) "1" else "0") }
                     val asyncMode = dxvkAsyncMode(s.dxvkVersion)
@@ -908,7 +908,7 @@ private fun ShortcutCategoryV2(
                     SettingsDivider()
                     SettingChoice("Wine Renderer", s.wineRenderer, listOf("vulkan", "gl")) { s.wineRenderer = it; s.wrapperValue("renderer", it) }
                     SettingsDivider()
-                    SettingText("Video Memory", s.videoMemory) { s.videoMemory = it.filter(Char::isDigit).take(6); s.wrapperValue("videoMemorySize", s.videoMemory) }
+                    SettingText("显存", s.videoMemory) { s.videoMemory = it.filter(Char::isDigit).take(6); s.wrapperValue("videoMemorySize", s.videoMemory) }
                 }
             }
             SettingsCard {
@@ -1041,7 +1041,7 @@ private fun ExecArgumentsEditorV2(value: String, onChanged: (String) -> Unit) {
             OutlinedTextField(
                 value = value,
                 onValueChange = onChanged,
-                label = { Text("Exec Arguments") },
+                label = { Text("启动参数") },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
                 shape = RoundedCornerShape(10.dp)
@@ -1068,7 +1068,7 @@ private fun ExecArgumentsEditorV2(value: String, onChanged: (String) -> Unit) {
 private fun ShortcutVulkanExtensionsV2(context: Context, driver: String, blacklisted: String, onChanged: (String) -> Unit) {
     val extensions = remember(driver) { runCatching { GPUInformation.enumerateExtensions(driver, context).toList().sorted() }.getOrDefault(emptyList()) }
     if (extensions.isEmpty()) {
-        SettingText("Disabled Vulkan Extensions", blacklisted, 2) { onChanged(it.replace(" ", "")) }
+        SettingText("已禁用的 Vulkan 扩展", blacklisted, 2) { onChanged(it.replace(" ", "")) }
         return
     }
     val disabled = blacklisted.split(',').map(String::trim).filter(String::isNotBlank).toSet()
@@ -1076,8 +1076,8 @@ private fun ShortcutVulkanExtensionsV2(context: Context, driver: String, blackli
     var open by remember { mutableStateOf(false) }
     Surface(onClick = { open = true }, color = Color.Transparent, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp)) {
-            Text("Vulkan Extensions", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("$enabledCount of ${extensions.size} enabled", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+            Text("Vulkan 扩展", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("已启用 $enabledCount / ${extensions.size}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
         }
     }
     if (open) {
@@ -1085,10 +1085,10 @@ private fun ShortcutVulkanExtensionsV2(context: Context, driver: String, blackli
         AlertDialog(
             onDismissRequest = { open = false },
             confirmButton = {
-                TextButton(onClick = { onChanged(extensions.filterNot { it in selected }.joinToString(",")); open = false }) { Text("Done") }
+                TextButton(onClick = { onChanged(extensions.filterNot { it in selected }.joinToString(",")); open = false }) { Text("完成") }
             },
-            dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
-            title = { Text("Vulkan Extensions") },
+            dismissButton = { TextButton(onClick = { open = false }) { Text("取消") } },
+            title = { Text("Vulkan 扩展") },
             text = {
                 LazyColumn(Modifier.heightIn(max = 460.dp)) {
                     items(extensions) { extension ->

@@ -104,7 +104,7 @@ internal fun ContainerSystemInline(containerId: Int, callbacks: ContainerInlineC
             value = name,
             onValueChange = { name = it },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp),
-            label = { Text("Container name") },
+            label = { Text("容器名称") },
             singleLine = true,
             shape = RoundedCornerShape(10.dp)
         )
@@ -122,14 +122,14 @@ internal fun ContainerSystemInline(containerId: Int, callbacks: ContainerInlineC
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(wallpaperLabel, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedButton(onClick = { imagePicker.launch("image/*") }) { Text("Choose image") }
+                OutlinedButton(onClick = { imagePicker.launch("image/*") }) { Text("选择图片") }
             }
         } else {
             OutlinedTextField(
                 value = backgroundColor,
                 onValueChange = { backgroundColor = it.take(7) },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp),
-                label = { Text("Background color") },
+                label = { Text("背景颜色") },
                 singleLine = true,
                 shape = RoundedCornerShape(10.dp)
             )
@@ -206,7 +206,7 @@ internal fun ContainerStorageInline(containerId: Int, callbacks: ContainerInline
                     value = drive.path,
                     onValueChange = { drives[index] = drive.copy(path = it) },
                     modifier = Modifier.weight(1f),
-                    label = { Text("Target Path") },
+                    label = { Text("目标路径") },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp)
                 )
@@ -228,7 +228,7 @@ internal fun ContainerStorageInline(containerId: Int, callbacks: ContainerInline
                 drives.add(InlineDrive(letters.firstOrNull { it !in used } ?: "E:", "/storage/emulated/0"))
             },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp)
-        ) { Text("Add") }
+        ) { Text("添加") }
         SSSave {
             val serialized = drives.filter { it.path.isNotBlank() }.joinToString("") {
                 "${it.letter.removeSuffix(":")}:${it.path}"
@@ -326,7 +326,7 @@ private fun SSSave(onClick: () -> Unit) {
     Button(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-    ) { Text("Save", fontWeight = FontWeight.SemiBold) }
+    ) { Text("保存", fontWeight = FontWeight.SemiBold) }
 }
 
 @Composable

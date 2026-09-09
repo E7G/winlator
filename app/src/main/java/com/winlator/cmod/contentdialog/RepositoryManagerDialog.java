@@ -57,8 +57,8 @@ public class RepositoryManagerDialog {
 
         builder.setView(recyclerView);
         
-        builder.setPositiveButton("Add Source", (d, w) -> showRepoDialog(null, -1));
-        builder.setNegativeButton("Close", null);
+        builder.setPositiveButton("添加源", (d, w) -> showRepoDialog(null, -1));
+        builder.setNegativeButton("关闭", null);
 
         dialog = builder.create();
         dialog.show();
@@ -68,7 +68,7 @@ public class RepositoryManagerDialog {
     
     private void showRepoDialog(DriverRepo repoToEdit, int position) {
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle(repoToEdit == null ? "Add Repository" : "Edit Repository");
+        builder.setTitle(repoToEdit == null ? "添加仓库" : "编辑仓库");
 
         final EditText inputName = new EditText(context);
         inputName.setHint("名称（例如 Turnip 驱动）");
@@ -85,7 +85,7 @@ public class RepositoryManagerDialog {
         layout.addView(inputUrl);
         builder.setView(layout);
 
-        builder.setPositiveButton("Save", (d, w) -> {
+        builder.setPositiveButton("保存", (d, w) -> {
             String name = inputName.getText().toString().trim();
             String url = inputUrl.getText().toString().trim();
             
@@ -107,7 +107,7 @@ public class RepositoryManagerDialog {
                 adapter.notifyDataSetChanged();
             }
         });
-        builder.setNegativeButton("Cancel", null);
+        builder.setNegativeButton("取消", null);
         builder.show();
     }
 

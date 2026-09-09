@@ -122,7 +122,7 @@ public class ImagePickerView extends View implements View.OnClickListener {
         row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         TextView action = new TextView(getContext());
-        action.setText(WineThemeManager.getUserWallpaperFile(getContext()).isFile() ? "Change image" : "Choose image");
+        action.setText(WineThemeManager.getUserWallpaperFile(getContext()).isFile() ? "更改图片" : "选择图片");
         action.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         action.setGravity(Gravity.CENTER);
         action.setClickable(true);

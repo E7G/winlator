@@ -1887,7 +1887,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     container.putExtra("graphicsColorMode", "0");
                 }
                 container.saveData();
-                Toast.makeText(this, "Preset saved", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "预设已保存", Toast.LENGTH_SHORT).show();
             });
         }
 

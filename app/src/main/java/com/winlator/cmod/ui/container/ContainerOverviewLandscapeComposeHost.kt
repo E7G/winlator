@@ -90,7 +90,7 @@ private fun LandscapeContainerOverview(model: ContainerOverviewModel, callbacks:
                         .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()).height(48.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)
-                ) { Text("Launch Environment", fontWeight = FontWeight.SemiBold) }
+                ) { Text("启动运行环境", fontWeight = FontWeight.SemiBold) }
             }
         }
     ) { padding ->

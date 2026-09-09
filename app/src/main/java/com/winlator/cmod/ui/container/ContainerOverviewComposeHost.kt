@@ -119,7 +119,7 @@ private fun ContainerOverviewScreen(model: ContainerOverviewModel, callbacks: Co
                         .padding(bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()).height(52.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)
-                ) { Text("Launch Environment", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
+                ) { Text("启动运行环境", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
             }
         }
     ) { padding ->

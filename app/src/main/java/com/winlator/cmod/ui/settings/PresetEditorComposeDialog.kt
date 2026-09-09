@@ -154,7 +154,7 @@ private fun PresetEditorScreen(
                     onValueChange = { name = it },
                     enabled = !readOnly,
                     singleLine = true,
-                    label = { Text("Preset") },
+                    label = { Text("预设") },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text(
@@ -195,7 +195,7 @@ private fun PresetEditorScreen(
                     modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancel") }
+                    TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("取消") }
                     Button(
                         onClick = {
                             val cleanName = name.trim().replace(Regex("[,|]+"), "")
@@ -203,7 +203,7 @@ private fun PresetEditorScreen(
                         },
                         enabled = !readOnly && name.isNotBlank(),
                         modifier = Modifier.weight(1f)
-                    ) { Text("Save") }
+                    ) { Text("保存") }
                 }
             }
         }
@@ -256,7 +256,7 @@ private fun PresetEditorScreen(
         AlertDialog(
             onDismissRequest = { helpText = null },
             confirmButton = {
-                TextButton(onClick = { helpText = null }) { Text("OK") }
+                TextButton(onClick = { helpText = null }) { Text("确定") }
             },
             text = { Text(message) }
         )
@@ -286,7 +286,7 @@ private fun PresetVariableRow(
                 IconButton(onClick = onHelp, modifier = Modifier.size(36.dp)) {
                     Icon(
                         Icons.Outlined.HelpOutline,
-                        contentDescription = "Help",
+                        contentDescription = "帮助",
                         modifier = Modifier.size(20.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )

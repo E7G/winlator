@@ -230,13 +230,13 @@ private fun TransferActions(callbacks: InputControlsCallbacks) {
             modifier = Modifier.weight(1f).height(48.dp),
             shape = RoundedCornerShape(12.dp),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-        ) { Icon(Icons.Outlined.FileDownload, null); Spacer(Modifier.width(8.dp)); Text("Import") }
+        ) { Icon(Icons.Outlined.FileDownload, null); Spacer(Modifier.width(8.dp)); Text("导入") }
         OutlinedButton(
             onClick = callbacks::onExportProfile,
             modifier = Modifier.weight(1f).height(48.dp),
             shape = RoundedCornerShape(12.dp),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-        ) { Icon(Icons.Outlined.FileUpload, null); Spacer(Modifier.width(8.dp)); Text("Export") }
+        ) { Icon(Icons.Outlined.FileUpload, null); Spacer(Modifier.width(8.dp)); Text("导出") }
     }
 }
 
@@ -250,7 +250,7 @@ private fun EditorButton(callbacks: InputControlsCallbacks) {
     ) {
         Icon(Icons.Outlined.SportsEsports, null)
         Spacer(Modifier.width(10.dp))
-        Text("Controls Editor", style = MaterialTheme.typography.titleMedium)
+        Text("控制编辑器", style = MaterialTheme.typography.titleMedium)
     }
 }
 
@@ -287,7 +287,7 @@ private fun ProfilePicker(model: InputControlsModel, selectedName: String, callb
             }
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.fillMaxWidth(0.82f)) {
-            DropdownMenuItem(text = { Text("-- Select Profile --") }, onClick = { expanded = false; callbacks.onProfileSelected(0) })
+            DropdownMenuItem(text = { Text("-- 选择配置 --") }, onClick = { expanded = false; callbacks.onProfileSelected(0) })
             model.profiles.forEach { profile ->
                 DropdownMenuItem(
                     text = { Text(profile.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -337,7 +337,7 @@ private fun EmptyControllers() {
         Column(modifier = Modifier.fillMaxWidth().padding(vertical = 22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Outlined.Gamepad, null, modifier = Modifier.size(30.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
-            Text("No controllers connected", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("未连接控制器", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

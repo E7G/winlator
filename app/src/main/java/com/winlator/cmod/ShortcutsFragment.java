@@ -531,11 +531,11 @@ public class ShortcutsFragment extends Fragment {
                 while ((length = is.read(buffer)) > 0) os.write(buffer, 0, length);
             }
 
-            Toast.makeText(getContext(), "Icon updated!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "图标已更新！", Toast.LENGTH_SHORT).show();
             loadShortcutsList();
 
         } catch (Exception e) {
-            Toast.makeText(getContext(), "Error saving icon", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "保存图标失败", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -643,7 +643,7 @@ public class ShortcutsFragment extends Fragment {
                 if (fileDeleted) {
                     disableShortcutOnScreen(requireContext(), shortcut);
                     loadShortcutsList();
-                    Toast.makeText(context, "Shortcut removed.", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(context, "快捷方式已删除。", Toast.LENGTH_SHORT).show();
                 }
             });
         }
@@ -658,7 +658,7 @@ public class ShortcutsFragment extends Fragment {
             }
             builder.setItems(containerNames, (dialog, which) -> {
                 if (shortcut.cloneToContainer(containers.get(which))) {
-                    Toast.makeText(context, "Cloned successfully.", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(context, "克隆成功。", Toast.LENGTH_SHORT).show();
                     loadShortcutsList();
                 }
             });

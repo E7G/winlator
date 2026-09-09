@@ -134,7 +134,7 @@ fun EnvironmentVariablesEditor(
         OutlinedButton(onClick = { addOpen = true }, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Outlined.Add, null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.size(7.dp))
-            Text("Add variable")
+            Text("添加变量")
         }
     }
 
@@ -178,13 +178,13 @@ private fun EnvironmentVariableRow(
                 )
             }
             EnvValueKind.SELECT -> SettingChoice(
-                label = "Value",
+                label = "值",
                 selected = row.value.ifBlank { spec.options.firstOrNull().orEmpty() },
                 entries = spec.options
             ) { onValue(it) }
             EnvValueKind.MULTI -> MultiEnvironmentChoice(spec.options, row.value, onValue)
-            EnvValueKind.NUMBER -> SettingText("Value", row.value) { onValue(it.filter(Char::isDigit)) }
-            EnvValueKind.TEXT -> SettingText("Value", row.value, onChanged = onValue)
+            EnvValueKind.NUMBER -> SettingText("值", row.value) { onValue(it.filter(Char::isDigit)) }
+            EnvValueKind.TEXT -> SettingText("值", row.value, onChanged = onValue)
         }
     }
 }
@@ -195,7 +195,7 @@ private fun MultiEnvironmentChoice(options: List<String>, value: String, onChang
     val selectedText = value.ifBlank { "None" }
     Surface(onClick = { open = true }, color = androidx.compose.ui.graphics.Color.Transparent, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp)) {
-            Text("Value", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("值", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(selectedText, style = MaterialTheme.typography.bodyLarge)
         }
     }
@@ -211,10 +211,10 @@ private fun MultiEnvironmentChoice(options: List<String>, value: String, onChang
                 TextButton(onClick = {
                     onChanged(selected.joinToString(","))
                     open = false
-                }) { Text("Done") }
+                }) { Text("完成") }
             },
-            dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
-            title = { Text("Select values") },
+            dismissButton = { TextButton(onClick = { open = false }) { Text("取消") } },
+            title = { Text("选择值") },
             text = {
                 LazyColumn(Modifier.heightIn(max = 420.dp)) {
                     items(options) { option ->
@@ -264,17 +264,17 @@ private fun AddEnvironmentVariableDialog(
                     }
                     onAdd(finalName, initial)
                 }
-            }) { Text("Add") }
+            }) { Text("添加") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        title = { Text("Add environment variable") },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        title = { Text("添加环境变量") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SettingChoice("Variable", selected, options) { picked ->
                     name = if (picked == "Custom…") "" else picked
                 }
                 if (selected == "Custom…") {
-                    SettingText("Name", customName) { customName = it }
+                    SettingText("名称", customName) { customName = it }
                 }
             }
         }

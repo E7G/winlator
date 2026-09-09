@@ -379,7 +379,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         scope.launch {
             val installed = installRuntimeComponent(context, type, version)
             installing = installing - key
-            if (installed == null) Toast.makeText(context, "Unable to install $version", Toast.LENGTH_SHORT).show()
+            if (installed == null) Toast.makeText(context, "无法安装 $version", Toast.LENGTH_SHORT).show()
             else {
                 done(installed)
                 revision++
@@ -394,7 +394,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         scope.launch {
             val installedId = installWineRuntimeComponent(context, option)
             installing = installing - key
-            if (installedId == null) Toast.makeText(context, "Unable to install ${option.label}", Toast.LENGTH_LONG).show()
+            if (installedId == null) Toast.makeText(context, "无法安装 ${option.label}", Toast.LENGTH_LONG).show()
             else {
                 state.runtime = installedId
                 contents.syncContents()
@@ -410,7 +410,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         scope.launch {
             val installed = installAdrenoDriver(context, option)
             installing = installing - key
-            if (installed == null) Toast.makeText(context, "Unable to install ${option.label}", Toast.LENGTH_SHORT).show()
+            if (installed == null) Toast.makeText(context, "无法安装 ${option.label}", Toast.LENGTH_SHORT).show()
             else {
                 state.driverVersion = installed
                 state.graphics("version", installed)
@@ -543,7 +543,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
             }
             manager.createContainerAsync(data, contents) { created ->
                 creating = false
-                if (created == null) Toast.makeText(context, "Unable to create container.", Toast.LENGTH_LONG).show()
+                if (created == null) Toast.makeText(context, "无法创建容器。", Toast.LENGTH_LONG).show()
                 else {
                     applyMouseWarp(created)
                     onCreated()
@@ -551,7 +551,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
             }
         } catch (_: Exception) {
             creating = false
-            Toast.makeText(context, "Unable to create container.", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "无法创建容器。", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -561,7 +561,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text(if (editing == null) "New container" else state.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = { Text(if (editing == null) "新建容器" else state.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, null) } }
             )
         },
@@ -574,7 +574,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp).height(50.dp),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text(if (creating) "Creating…" else "Create container", fontWeight = FontWeight.SemiBold)
+                        Text(if (creating) "正在创建…" else "创建容器", fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -698,7 +698,7 @@ private fun ContainerCategoryV2(
                 s.desktopBackground = "Image"
                 s.wallpaperStamp = stamp
             }.onFailure {
-                Toast.makeText(context, "Unable to set wallpaper image.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "无法设置壁纸图片。", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -706,7 +706,7 @@ private fun ContainerCategoryV2(
     when (category) {
         "General" -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SettingsCard {
-                SettingText("Name", s.name) { s.name = it }
+                SettingText("名称", s.name) { s.name = it }
                 SettingsDivider()
                 SettingWineRuntimeChoice("Wine / Proton", s.runtime, runtimes, installing, installWine) { s.runtime = it }
             }
@@ -784,7 +784,7 @@ private fun ContainerCategoryV2(
                             )
                         }
                         TextButton(onClick = { wallpaperPicker.launch("image/*") }) {
-                            Text(if (s.wallpaperStamp > 0L) "Change" else "Choose")
+                            Text(if (s.wallpaperStamp > 0L) "更改" else "选择")
                         }
                     }
                 }
@@ -810,7 +810,7 @@ private fun ContainerCategoryV2(
                 }
                 if (shownScreen == "Custom") {
                     SettingsDivider()
-                    SettingText("Custom resolution", s.screen) { s.screen = it }
+                    SettingText("自定义分辨率", s.screen) { s.screen = it }
                 }
                 SettingsDivider()
                 SettingChoice("Renderer", s.renderer, listOf("Vulkan", "EGL")) {
@@ -950,7 +950,7 @@ private fun ContainerCategoryV2(
                         s.vkd3dLevel = it; s.wrapperValue("vkd3dLevel", it)
                     }
                     SettingsDivider()
-                    SettingText("Frame Rate", s.frameRate) {
+                    SettingText("帧率", s.frameRate) {
                         s.frameRate = it.filter(Char::isDigit).take(4); s.wrapperValue("framerate", s.frameRate.ifBlank { "0" })
                     }
                     SettingsDivider()
@@ -1060,7 +1060,7 @@ private fun ContainerVulkanExtensionsV2(
         runCatching { GPUInformation.enumerateExtensions(driver, context).toList().sorted() }.getOrDefault(emptyList())
     }
     if (extensions.isEmpty()) {
-        SettingText("Disabled Vulkan Extensions", blacklisted, 2) { onChanged(it.replace(" ", "")) }
+        SettingText("已禁用的 Vulkan 扩展", blacklisted, 2) { onChanged(it.replace(" ", "")) }
         return
     }
     val disabled = blacklisted.split(',').map(String::trim).filter(String::isNotBlank).toSet()
@@ -1068,8 +1068,8 @@ private fun ContainerVulkanExtensionsV2(
     var open by remember { mutableStateOf(false) }
     Surface(onClick = { open = true }, color = Color.Transparent, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp)) {
-            Text("Vulkan Extensions", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("$enabledCount of ${extensions.size} enabled", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+            Text("Vulkan 扩展", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("已启用 $enabledCount / ${extensions.size}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
         }
     }
     if (open) {
@@ -1081,10 +1081,10 @@ private fun ContainerVulkanExtensionsV2(
             confirmButton = {
                 TextButton(onClick = {
                     onChanged(extensions.filterNot { it in selected }.joinToString(",")); open = false
-                }) { Text("Done") }
+                }) { Text("完成") }
             },
-            dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
-            title = { Text("Vulkan Extensions") },
+            dismissButton = { TextButton(onClick = { open = false }) { Text("取消") } },
+            title = { Text("Vulkan 扩展") },
             text = {
                 LazyColumn(Modifier.heightIn(max = 460.dp)) {
                     items(extensions) { extension ->

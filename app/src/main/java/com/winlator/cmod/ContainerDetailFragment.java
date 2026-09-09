@@ -298,7 +298,7 @@ public class ContainerDetailFragment extends Fragment implements DXVKConfigDialo
                         openDirectoryCallback.call(path);
                     }
                 } else {
-                    Toast.makeText(getContext(), "Invalid directory selected", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getContext(), "选择的目录无效", Toast.LENGTH_SHORT).show();
                 }
             }
             openDirectoryCallback = null;

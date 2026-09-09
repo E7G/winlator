@@ -152,7 +152,7 @@ fun WinlatorThemePreferenceCard(modifier: Modifier = Modifier) {
             }
             Spacer(Modifier.width(11.dp))
             Column(Modifier.weight(1f)) {
-                Text("Theme", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                Text("主题", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                 Text(current.displayName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -174,7 +174,7 @@ fun WinlatorThemePreferenceCard(modifier: Modifier = Modifier) {
                     .padding(horizontal = 18.dp)
                     .padding(bottom = 24.dp)
             ) {
-                Text("Appearance", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                Text("外观", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text(
                     "Choose the Winlator theme. Changes are applied immediately.",
                     modifier = Modifier.padding(top = 4.dp, bottom = 14.dp),

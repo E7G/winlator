@@ -180,12 +180,12 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 30.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
-            item("appearance-title") { SectionTitle("APPEARANCE") }
+            item("appearance-title") { SectionTitle("外观") }
             item("theme") { WinlatorThemePreferenceCard() }
 
-            item("environment-title") { SectionTitle("ENVIRONMENTS") }
+            item("environment-title") { SectionTitle("运行环境") }
             item("containers") {
-                NavigationRow(Icons.Outlined.Dns, "Containers", "Create and manage Windows environments") {
+                NavigationRow(Icons.Outlined.Dns, "容器", "Create and manage Windows environments") {
                     context.startActivity(Intent(context, ContainersSettingsActivity::class.java))
                 }
             }
@@ -193,7 +193,7 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
                 NavigationRow(Icons.Outlined.Apps, "Components", "Wine, Proton, DXVK, VKD3D and runtimes", callbacks::onOpenComponents)
             }
 
-            item("presets-title") { SectionTitle("PRESETS") }
+            item("presets-title") { SectionTitle("预设") }
             item("presets") {
                 GroupCard {
                     PresetChoiceRow(
@@ -223,20 +223,20 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
                 SoundFontCard(model.soundFonts, callbacks::onInstallSoundFont, callbacks::onRemoveSoundFont)
             }
 
-            item("paths-title") { SectionTitle("PATH SETTINGS") }
-            item("winlator-path") { NavigationRow(Icons.Outlined.Storage, "Winlator Path", model.winlatorPath, callbacks::onChooseWinlatorPath) }
-            item("shortcut-path") { NavigationRow(Icons.Outlined.FolderOpen, "Shortcut Export Path", model.shortcutPath, callbacks::onChooseShortcutPath) }
+            item("paths-title") { SectionTitle("路径设置") }
+            item("winlator-path") { NavigationRow(Icons.Outlined.Storage, "Winlator 路径", model.winlatorPath, callbacks::onChooseWinlatorPath) }
+            item("shortcut-path") { NavigationRow(Icons.Outlined.FolderOpen, "快捷方式导出路径", model.shortcutPath, callbacks::onChooseShortcutPath) }
 
-            item("big-picture-title") { SectionTitle("BIG PICTURE MODE") }
+            item("big-picture-title") { SectionTitle("大屏模式") }
             item("big-picture") {
                 GroupCard {
-                    ToggleRow("Enable Big Picture Mode on App Launch", model.bigPicture) { callbacks.onBooleanChanged("enable_big_picture_mode", it) }
+                    ToggleRow("应用启动时启用大屏模式", model.bigPicture) { callbacks.onBooleanChanged("enable_big_picture_mode", it) }
                     GroupDivider()
-                    ToggleRow("Set SteamGrid API Key? (Cover Art)", model.customApiKeyEnabled) { callbacks.onBooleanChanged("enable_custom_api_key", it) }
+                    ToggleRow("设置 SteamGrid API 密钥？（封面）", model.customApiKeyEnabled) { callbacks.onBooleanChanged("enable_custom_api_key", it) }
                 }
             }
             if (model.customApiKeyEnabled) {
-                item("api-key") { EditableValueCard("SteamGridDB API Key", model.customApiKey, callbacks::onCustomApiKeyChanged) }
+                item("api-key") { EditableValueCard("SteamGridDB API 密钥", model.customApiKey, callbacks::onCustomApiKeyChanged) }
             }
 
             item("xserver-title") { SectionTitle(stringResource(R.string.xserver)) }
@@ -250,9 +250,9 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
                         ToggleRow(stringResource(R.string.use_xr), model.useXr) { callbacks.onBooleanChanged("use_xr", it) }
                     }
                     GroupDivider()
-                    ToggleRow("Capture External Pointer", model.cursorLock) { callbacks.onBooleanChanged("cursor_lock", it) }
+                    ToggleRow("捕获外部指针", model.cursorLock) { callbacks.onBooleanChanged("cursor_lock", it) }
                     GroupDivider()
-                    ToggleRow("Disable Xinput (Used for Exclusive M/KB support)", model.xInput) { callbacks.onBooleanChanged("xinput_toggle", it) }
+                    ToggleRow("禁用 XInput（用于独占鼠标/键盘支持）", model.xInput) { callbacks.onBooleanChanged("xinput_toggle", it) }
                 }
             }
 
@@ -289,14 +289,14 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
                     ToggleRow(stringResource(R.string.remove_loading_bar_when_booting_games), model.removeLoadingBar) { callbacks.onBooleanChanged("remove_loading_bar_when_booting_games", it) }
                 }
             }
-            item("contents-url") { EditableValueCard("Downloadable Contents URL", model.contentsUrl, callbacks::onContentsUrlChanged) }
+            item("contents-url") { EditableValueCard("可下载组件地址", model.contentsUrl, callbacks::onContentsUrlChanged) }
 
             item("imagefs-title") { SectionTitle(stringResource(R.string.imagefs)) }
             item("imagefs") { NavigationRow(Icons.Outlined.Refresh, stringResource(R.string.reinstall_imagefs), null, callbacks::onReinstallImageFs) }
 
-            item("about-title") { SectionTitle("ABOUT") }
+            item("about-title") { SectionTitle("关于") }
             item("about") {
-                NavigationRow(Icons.Outlined.Info, "About", null) { activity?.showAboutDialog() }
+                NavigationRow(Icons.Outlined.Info, "关于", null) { activity?.showAboutDialog() }
             }
         }
     }
@@ -369,7 +369,7 @@ private fun CursorSpeedRow(value: Int, onChanged: (Int) -> Unit) {
     var draft by remember(value) { mutableFloatStateOf(value.coerceIn(10, 200).toFloat()) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Cursor speed", modifier = Modifier.weight(1f))
+            Text("光标速度", modifier = Modifier.weight(1f))
             Text("${draft.roundToInt()}%", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Slider(
@@ -421,7 +421,7 @@ private fun PresetChoiceRow(
                 }
                 DropdownMenu(expanded = actionsOpen, onDismissRequest = { actionsOpen = false }) {
                     DropdownMenuItem(
-                        text = { Text("Create new") },
+                        text = { Text("新建") },
                         leadingIcon = { Icon(Icons.Outlined.Add, null) },
                         onClick = {
                             actionsOpen = false
@@ -430,7 +430,7 @@ private fun PresetChoiceRow(
                     )
                     if (selectedId.isNotBlank()) {
                         DropdownMenuItem(
-                            text = { Text("Clone") },
+                            text = { Text("克隆") },
                             leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) },
                             onClick = {
                                 actionsOpen = false
@@ -438,7 +438,7 @@ private fun PresetChoiceRow(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Edit") },
+                            text = { Text("编辑") },
                             leadingIcon = { Icon(Icons.Outlined.Edit, null) },
                             onClick = {
                                 actionsOpen = false
@@ -446,7 +446,7 @@ private fun PresetChoiceRow(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Delete") },
+                            text = { Text("删除") },
                             leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null) },
                             onClick = {
                                 actionsOpen = false
@@ -511,7 +511,7 @@ private fun WineDebugChannelsRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text("Wine debug channels", style = MaterialTheme.typography.bodyLarge)
+            Text("Wine 调试通道", style = MaterialTheme.typography.bodyLarge)
             Text(
                 summary,
                 style = MaterialTheme.typography.bodySmall,
@@ -555,13 +555,13 @@ private fun WineDebugChannelsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Wine debug channels") },
+        title = { Text("Wine 调试通道") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = { Text("Search channels") },
+                    label = { Text("搜索通道") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
@@ -594,10 +594,10 @@ private fun WineDebugChannelsDialog(
         },
         confirmButton = {
             TextButton(onClick = { onApply(allOptions.filter { it in selected }.joinToString(",")) }) {
-                Text("Apply")
+                Text("应用")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
 }
 
@@ -616,7 +616,7 @@ private fun SoundFontCard(choices: List<SettingChoice>, onInstall: () -> Unit, o
         Button(onClick = onInstall, modifier = Modifier.fillMaxWidth().padding(12.dp)) {
             Icon(Icons.Outlined.Add, null)
             Spacer(Modifier.width(7.dp))
-            Text("Install SoundFont")
+            Text("安装 SoundFont")
         }
     }
 }
@@ -631,6 +631,6 @@ private fun EditableInlineValue(label: String, initial: String, onSave: (String)
     var value by remember(initial) { mutableStateOf(initial) }
     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(value = value, onValueChange = { value = it }, label = { Text(label) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        Button(onClick = { onSave(value) }, modifier = Modifier.align(Alignment.End)) { Text("Save") }
+        Button(onClick = { onSave(value) }, modifier = Modifier.align(Alignment.End)) { Text("保存") }
     }
 }

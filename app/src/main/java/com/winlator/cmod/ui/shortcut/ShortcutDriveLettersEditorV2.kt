@@ -91,7 +91,7 @@ internal fun ShortcutDriveLettersEditorV2(container: Container) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text("Drive letters", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("驱动器盘符", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
                     "Changes apply to this container",
                     style = MaterialTheme.typography.bodySmall,
@@ -184,7 +184,7 @@ private fun ShortcutDriveLetterRowV2(
             onValueChange = onPath,
             modifier = Modifier.weight(1f),
             singleLine = true,
-            label = { Text("Path") },
+            label = { Text("路径") },
             placeholder = { Text("/storage/emulated/0/...", maxLines = 1, overflow = TextOverflow.Ellipsis) },
             shape = RoundedCornerShape(10.dp)
         )

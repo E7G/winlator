@@ -41,8 +41,8 @@ internal fun ClassicWelcomeLandscape(
             Column(Modifier.weight(.9f), horizontalAlignment = Alignment.CenterHorizontally) {
                 Image(painterResource(R.drawable.winlator_mark_exact), "Winlator", Modifier.size(132.dp))
                 Spacer(Modifier.height(14.dp))
-                Text("Welcome to Winlator", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-                Text("Your lightweight PC emulator for Android.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                Text("欢迎使用 Winlator", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                Text("轻量高效的 Android PC 模拟器。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
             }
             Spacer(Modifier.width(36.dp))
             Column(Modifier.weight(1f)) {

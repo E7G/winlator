@@ -270,7 +270,7 @@ public class OnboardingActivity extends AppCompatActivity {
                 .setTitle("Delete " + BUNDLED_RUNTIME_NAME + "?")
                 .setMessage("内置 Proton 文件将被删除，之后可以重新安装。")
                 .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton("Delete", (dialog, which) -> removeBundledRuntime())
+                .setPositiveButton("删除", (dialog, which) -> removeBundledRuntime())
                 .show();
     }
 
@@ -633,7 +633,7 @@ public class OnboardingActivity extends AppCompatActivity {
                     .setTitle("删除驱动？")
                     .setMessage("已安装的驱动文件将被删除。")
                     .setNegativeButton(android.R.string.cancel, null)
-                    .setPositiveButton("Delete", (d, w) -> removeDriver(componentId.substring("adrenotools:".length())))
+                    .setPositiveButton("删除", (d, w) -> removeDriver(componentId.substring("adrenotools:".length())))
                     .show();
             return;
         }
@@ -657,7 +657,7 @@ public class OnboardingActivity extends AppCompatActivity {
                 .setTitle("删除组件？")
                 .setMessage("已安装文件将从 WinZ 中删除。")
                 .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton("Delete", (d, w) -> removeContent(profile, componentId))
+                .setPositiveButton("删除", (d, w) -> removeContent(profile, componentId))
                 .show();
     }
 
@@ -676,7 +676,7 @@ public class OnboardingActivity extends AppCompatActivity {
                 .setTitle("删除组件？")
                 .setMessage("已安装文件将从 WinZ 中删除。")
                 .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton("Delete", (d, w) -> {
+                .setPositiveButton("删除", (d, w) -> {
                     if (installBusy) return;
                     installBusy = true;
                     composeController.setInstallBusy(componentId, true);
@@ -815,7 +815,7 @@ public class OnboardingActivity extends AppCompatActivity {
                     composeController.setInstallBusy(null, false);
                     syncComposeCatalog();
                     if (installed == null || installed.isEmpty()) {
-                        Toast.makeText(this, "Unable to install the driver.", Toast.LENGTH_LONG).show();
+                        Toast.makeText(this, "无法安装驱动。", Toast.LENGTH_LONG).show();
                     }
                 });
             });
@@ -856,7 +856,7 @@ public class OnboardingActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, results);
         if (requestCode == REQUEST_STORAGE) {
             if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) continuePermissionFlow();
-            else Toast.makeText(this, "Storage access is required to manage games.", Toast.LENGTH_LONG).show();
+            else Toast.makeText(this, "需要存储访问权限才能管理游戏。", Toast.LENGTH_LONG).show();
         } else if (requestCode == REQUEST_NOTIFICATIONS) {
             finishOnboarding();
         }
@@ -879,14 +879,14 @@ public class OnboardingActivity extends AppCompatActivity {
         String runtime = resolveSelectedRuntime();
         if (runtime == null) {
             finishing = false;
-            Toast.makeText(this, "Install and select a Wine or Proton layer first.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "请先安装并选择 Wine 或 Proton 兼容层。", Toast.LENGTH_LONG).show();
             return;
         }
 
         WineInfo wineInfo = WineInfo.fromIdentifier(this, contentsManager, runtime);
         if (wineInfo.path == null || wineInfo.path.isEmpty()) {
             finishing = false;
-            Toast.makeText(this, "The selected Wine/Proton layer is no longer installed.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "所选 Wine/Proton 兼容层已不再安装。", Toast.LENGTH_LONG).show();
             return;
         }
 
@@ -915,14 +915,14 @@ public class OnboardingActivity extends AppCompatActivity {
             manager.createContainerAsync(data, contentsManager, created -> {
                 if (created == null) {
                     finishing = false;
-                    Toast.makeText(this, "Unable to create the first container.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "无法创建首个容器。", Toast.LENGTH_LONG).show();
                 } else {
                     enterMainApp();
                 }
             });
         } catch (Exception error) {
             finishing = false;
-            Toast.makeText(this, "Unable to prepare the first container.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "无法准备首个容器。", Toast.LENGTH_LONG).show();
         }
     }
 

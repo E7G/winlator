@@ -176,7 +176,7 @@ private fun AdvancedContainerScreen(containerId: Int, onCancel: () -> Unit, onSa
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
             Column(Modifier.fillMaxSize().padding(16.dp)) {
-                Text("Advanced", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text("高级", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Text(
                     "Environment, Windows components, startup, game controller and processor affinity",
                     style = MaterialTheme.typography.bodySmall,
@@ -241,7 +241,7 @@ private fun AdvancedContainerScreen(containerId: Int, onCancel: () -> Unit, onSa
                     modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancel") }
+                    TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("取消") }
                     Button(
                         onClick = {
                             container.setEnvVars(envRows.joinToString(" ") {
@@ -263,7 +263,7 @@ private fun AdvancedContainerScreen(containerId: Int, onCancel: () -> Unit, onSa
                             onSaved()
                         },
                         modifier = Modifier.weight(1f)
-                    ) { Text("Save") }
+                    ) { Text("保存") }
                 }
             }
         }
@@ -289,7 +289,7 @@ private fun AdvancedEnvironmentPage(rows: MutableList<AdvancedEnvEntry>) {
             ) {
                 Icon(Icons.Outlined.Add, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(7.dp))
-                Text("Add variable")
+                Text("添加变量")
             }
         }
     }
@@ -303,14 +303,14 @@ private fun AdvancedEnvironmentPage(rows: MutableList<AdvancedEnvEntry>) {
                     val clean = name.trim().replace(" ", "")
                     if (clean.isNotEmpty() && rows.none { it.name == clean }) rows.add(AdvancedEnvEntry(clean, value.trim()))
                     addOpen = false
-                }) { Text("Add") }
+                }) { Text("添加") }
             },
-            dismissButton = { TextButton(onClick = { addOpen = false }) { Text("Cancel") } },
-            title = { Text("Add environment variable") },
+            dismissButton = { TextButton(onClick = { addOpen = false }) { Text("取消") } },
+            title = { Text("添加环境变量") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true)
-                    OutlinedTextField(value, { value = it }, label = { Text("Value") }, singleLine = true)
+                    OutlinedTextField(name, { name = it }, label = { Text("名称") }, singleLine = true)
+                    OutlinedTextField(value, { value = it }, label = { Text("值") }, singleLine = true)
                 }
             }
         )
@@ -385,14 +385,14 @@ private fun AdvancedStartupInputPage(
     )
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(10.dp)) {
         item {
-            Text("System", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+            Text("系统", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
             AdvancedChoice("Startup Selection", startupEntries[startup.coerceIn(0, 2)], startupEntries) {
                 onStartup(startupEntries.indexOf(it).coerceAtLeast(0))
             }
         }
         item { HorizontalDivider(Modifier.padding(vertical = 10.dp)) }
         item {
-            Text("Game Controller", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+            Text("游戏控制器", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
             AdvancedToggle("Enable XInput for Games in Wine", xinput, exclusive, onXInput)
             AdvancedToggle("Enable DInput for Games in Wine", dinput, exclusive, onDInput)
             AdvancedToggle("Exclusive Input", exclusive, true, onExclusive)
@@ -413,11 +413,11 @@ private fun AdvancedCpuPage(sync: Boolean, onSync: (Boolean) -> Unit, cpu64: Mut
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { AdvancedToggle("Sync with Wine", sync, true, onSync) }
         item {
-            Text("Processor Affinity", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("处理器亲和性", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             CpuSelector(cpu64)
         }
         item {
-            Text("Processor Affinity (32-bit apps)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("处理器亲和性（32 位应用）", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             CpuSelector(cpu32)
         }
     }
@@ -492,7 +492,7 @@ private fun AdvancedMultiChoice(selected: String, entries: List<String>, onSelec
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(selected.ifBlank { "None" }, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(selected.ifBlank { "无" }, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
             Icon(Icons.Outlined.KeyboardArrowDown, null)
         }
     }
@@ -502,8 +502,8 @@ private fun AdvancedMultiChoice(selected: String, entries: List<String>, onSelec
         }
         AlertDialog(
             onDismissRequest = { open = false },
-            confirmButton = { TextButton(onClick = { onSelected(draft.joinToString(",")); open = false }) { Text("Done") } },
-            dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
+            confirmButton = { TextButton(onClick = { onSelected(draft.joinToString(",")); open = false }) { Text("完成") } },
+            dismissButton = { TextButton(onClick = { open = false }) { Text("取消") } },
             text = {
                 LazyColumn(Modifier.heightIn(max = 430.dp)) {
                     items(entries) { option ->

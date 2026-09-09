@@ -144,7 +144,7 @@ private fun ContainersScreen(
                         }
                     }
                     Spacer(Modifier.height(14.dp))
-                    Text("No containers yet", style = MaterialTheme.typography.titleLarge)
+                    Text("暂无容器", style = MaterialTheme.typography.titleLarge)
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "Create a container to prepare your first Windows environment.",

@@ -133,7 +133,7 @@ internal fun ContainerRuntimePane(
         scope.launch {
             val installed = installRuntimeComponent(context, type, version)
             installing = installing - key
-            if (installed == null) Toast.makeText(context, "Unable to install $version", Toast.LENGTH_SHORT).show()
+            if (installed == null) Toast.makeText(context, "无法安装 $version", Toast.LENGTH_SHORT).show()
             else { done(installed); revision++ }
         }
     }
@@ -144,7 +144,7 @@ internal fun ContainerRuntimePane(
         scope.launch {
             val installed = installAdrenoDriver(context, option)
             installing = installing - key
-            if (installed == null) Toast.makeText(context, "Unable to install ${option.label}", Toast.LENGTH_SHORT).show()
+            if (installed == null) Toast.makeText(context, "无法安装 ${option.label}", Toast.LENGTH_SHORT).show()
             else { driverVersion = installed; saveGraphics("version", installed); revision++ }
         }
     }
@@ -189,7 +189,7 @@ internal fun ContainerRuntimePane(
                     }
                 }
                 if (screenChoice.equals("Custom", true)) {
-                    SettingsDivider(); SettingText("Custom resolution", screen) {
+                    SettingsDivider(); SettingText("自定义分辨率", screen) {
                         screen = it
                         if (Regex("\\d{2,5}x\\d{2,5}", RegexOption.IGNORE_CASE).matches(it.trim())) {
                             container.setScreenSize(normalizeResolution(it)); container.saveData()
@@ -215,8 +215,8 @@ internal fun ContainerRuntimePane(
                 SettingsDivider(); SettingChoice("BCN Emulation", bcnEmulation, listOf("none", "partial", "full", "auto")) { bcnEmulation = it; saveGraphics("bcnEmulation", it) }
                 SettingsDivider(); SettingChoice("BCN Emulation Type", bcnType, listOf("software", "compute")) { bcnType = it; saveGraphics("bcnEmulationType", it) }
                 SettingsDivider(); SettingToggle("BCN Emulation Cache", bcnCache) { bcnCache = it; saveGraphics("bcnEmulationCache", if (it) "1" else "0") }
-                SettingsDivider(); SettingText("GPU Name", gpuName) { gpuName = it; saveGraphics("gpuName", it) }
-                SettingsDivider(); SettingText("Blacklisted Extensions", blacklistedExtensions, 2) { blacklistedExtensions = it; saveGraphics("blacklistedExtensions", it.replace(" ", "")) }
+                SettingsDivider(); SettingText("GPU 名称", gpuName) { gpuName = it; saveGraphics("gpuName", it) }
+                SettingsDivider(); SettingText("黑名单扩展", blacklistedExtensions, 2) { blacklistedExtensions = it; saveGraphics("blacklistedExtensions", it.replace(" ", "")) }
             }
         }
 
@@ -230,7 +230,7 @@ internal fun ContainerRuntimePane(
                         SettingsDivider(); SettingInstallChoice("VKD3D Version", vkd3dVersion, c.vkd3d, installing, "VKD3D", { v -> installRuntime("VKD3D", v) { vkd3dVersion = it; saveWrapper("vkd3dVersion", it) } }) { vkd3dVersion = it; saveWrapper("vkd3dVersion", it) }
                     }
                     SettingsDivider(); SettingChoice("VKD3D Feature Level", vkd3dLevel, listOf("12_0", "12_1", "12_2")) { vkd3dLevel = it; saveWrapper("vkd3dLevel", it) }
-                    SettingsDivider(); SettingText("Frame Rate", frameRate) { frameRate = it.filter(Char::isDigit).take(4); saveWrapper("framerate", frameRate.ifBlank { "0" }) }
+                    SettingsDivider(); SettingText("帧率", frameRate) { frameRate = it.filter(Char::isDigit).take(4); saveWrapper("framerate", frameRate.ifBlank { "0" }) }
                     SettingsDivider(); SettingToggle("Max Frame Latency", maxFrameLatency) { maxFrameLatency = it; saveWrapper("maxFrameLatency", if (it) "1" else "0") }
                     SettingsDivider(); SettingToggle("Async", async) { async = it; saveWrapper("async", if (it) "1" else "0") }
                     SettingsDivider(); SettingToggle("Async Cache", asyncCache) { asyncCache = it; saveWrapper("asyncCache", if (it) "1" else "0") }
@@ -240,11 +240,11 @@ internal fun ContainerRuntimePane(
                     SettingsDivider(); SettingToggle("Strict Shader Math", strictShaderMath) { strictShaderMath = it; saveWrapper("strict_shader_math", if (it) "1" else "0") }
                     SettingsDivider(); SettingChoice("Offscreen Rendering Mode", offscreenMode, listOf("fbo", "backbuffer")) { offscreenMode = it; saveWrapper("OffscreenRenderingMode", it) }
                     SettingsDivider(); SettingChoice("Wine Renderer", wineRenderer, listOf("vulkan", "gl")) { wineRenderer = it; saveWrapper("renderer", it) }
-                    SettingsDivider(); SettingText("Video Memory", videoMemory) { videoMemory = it.filter(Char::isDigit).take(6); saveWrapper("videoMemorySize", videoMemory) }
+                    SettingsDivider(); SettingText("显存", videoMemory) { videoMemory = it.filter(Char::isDigit).take(6); saveWrapper("videoMemorySize", videoMemory) }
                 }
             }
             SettingsCard {
-                Text("Runtime", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+                Text("运行环境", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
                 SettingsDivider()
                 if (arm64) {
                     SettingChoice("32-bit Emulator", emulator, listOf("FEXCore", "WOWBox64")) {

@@ -393,7 +393,7 @@ public class FileManagerFragment extends Fragment {
         View arrow = getView() != null ? getView().findViewById(R.id.IVDriveArrow) : null;
         if (arrow != null) arrow.setRotation(180f);
         if (discoveredExternalStorageRoots.isEmpty()) {
-            Toast.makeText(getContext(), "No external storage found", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "未找到外部存储", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -415,7 +415,7 @@ public class FileManagerFragment extends Fragment {
         driveOptionsPanel.addView(createDriveOptionRow(
                 "Drive Z:", "RootFS", samePath(currentDriveRoot, rootFs), () -> {
                     if (rootFs.exists()) openDrive(rootFs, rootFs);
-                    else Toast.makeText(getContext(), "RootFS not found", Toast.LENGTH_SHORT).show();
+                    else Toast.makeText(getContext(), "未找到 RootFS", Toast.LENGTH_SHORT).show();
                 }));
 
         if (discoveredExternalStorageRoots != null) {
@@ -434,7 +434,7 @@ public class FileManagerFragment extends Fragment {
 
     private void openDrive(File directory, File driveRoot) {
         if (directory == null || !directory.exists() || !directory.isDirectory() || !directory.canRead()) {
-            Toast.makeText(getContext(), "Storage is not accessible", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "无法访问存储", Toast.LENGTH_SHORT).show();
             return;
         }
         currentDriveRoot = driveRoot != null ? driveRoot : inferDriveRoot(directory);
@@ -498,7 +498,7 @@ public class FileManagerFragment extends Fragment {
             new AlertDialog.Builder(getContext())
                     .setTitle("没有容器")
                     .setMessage("需要先创建容器才能访问 C: 盘。")
-                    .setPositiveButton("OK", null)
+                    .setPositiveButton("确定", null)
                     .show();
             return;
         }
@@ -520,13 +520,13 @@ public class FileManagerFragment extends Fragment {
         File windowsDir = new File(driveC, "windows");
         if (driveC.exists() && driveC.isDirectory() && windowsDir.exists()) {
             openDrive(driveC, driveC);
-            Toast.makeText(getContext(), "Opened C: (" + container.getName() + ")", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "已打开 C:（" + container.getName() + ")", Toast.LENGTH_SHORT).show();
         } else {
             new AlertDialog.Builder(getContext())
                     .setTitle("C: 盘尚未初始化")
-                    .setMessage("The Wine system files (Drive C:) for '" + container.getName() + "' are missing.\n\n" +
+                    .setMessage("Wine 系统文件（C: 盘）缺失：'" + container.getName() + "'。\\n\\n" +
                             "Please RUN this container once to generate the filesystem.")
-                    .setPositiveButton("OK", null)
+                    .setPositiveButton("确定", null)
                     .show();
         }
     }
@@ -534,7 +534,7 @@ public class FileManagerFragment extends Fragment {
     private void navigateUp() {
         if (currentDir == null) return;
         if (currentDriveRoot != null && samePath(currentDir, currentDriveRoot)) {
-            Toast.makeText(getContext(), "Drive root reached", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "已到达驱动器根目录", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -542,13 +542,13 @@ public class FileManagerFragment extends Fragment {
         if (parent != null && parent.canRead() && isWithinRoot(parent, currentDriveRoot)) {
             loadDirectory(parent);
         } else {
-            Toast.makeText(getContext(), "Drive root reached", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "已到达驱动器根目录", Toast.LENGTH_SHORT).show();
         }
     }
 
     private void loadDirectory(File dir) {
         if (dir == null || !dir.exists() || !dir.isDirectory() || !dir.canRead()) {
-            Toast.makeText(getContext(), "Folder is not accessible", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "无法访问文件夹", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -602,7 +602,7 @@ public class FileManagerFragment extends Fragment {
     private void performContainerAction(File file, ContainerAction action) {
         ArrayList<Container> containers = containerManager.getContainers();
         if (containers == null || containers.isEmpty()) {
-            Toast.makeText(getContext(), "Create a container first!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "请先创建容器！", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -792,7 +792,7 @@ public class FileManagerFragment extends Fragment {
     private void runFileDirectly(File file, Container container) {
         try {
             if (!ensureExternalStorageMapped(container, file)) {
-                Toast.makeText(getContext(), "No free drive letter for external storage", Toast.LENGTH_LONG).show();
+                Toast.makeText(getContext(), "没有可用于外部存储的空闲盘符", Toast.LENGTH_LONG).show();
                 return;
             }
 
@@ -821,7 +821,7 @@ public class FileManagerFragment extends Fragment {
     private void createShortcutDirectly(File file, Container container) {
         try {
             if (!ensureExternalStorageMapped(container, file)) {
-                Toast.makeText(getContext(), "No free drive letter for external storage", Toast.LENGTH_LONG).show();
+                Toast.makeText(getContext(), "没有可用于外部存储的空闲盘符", Toast.LENGTH_LONG).show();
                 return;
             }
 
@@ -840,7 +840,7 @@ public class FileManagerFragment extends Fragment {
                 writer.println("Icon=" + displayName);
                 writer.println("container_id:" + container.id);
             }
-            Toast.makeText(getContext(), "Game added to Library!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "游戏已添加到游戏库！", Toast.LENGTH_SHORT).show();
 
             File iconDir64 = container.getIconsDir(64);
             if (!iconDir64.exists()) iconDir64.mkdirs();
@@ -876,7 +876,7 @@ public class FileManagerFragment extends Fragment {
 
     private void startPasteOperation() {
         if (clipboardFile == null || !clipboardFile.exists()) {
-            Toast.makeText(getContext(), "Nothing to paste", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "没有可粘贴的内容", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -885,14 +885,14 @@ public class FileManagerFragment extends Fragment {
         if (dest.exists()) {
             AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
             builder.setTitle("文件冲突");
-            builder.setMessage("The destination \"" + dest.getName() + "\" already exists.");
-            builder.setPositiveButton("Replace", (dialog, which) -> {
+            builder.setMessage("目标 \\\"" + dest.getName() + "\\\" 已存在。");
+            builder.setPositiveButton("替换", (dialog, which) -> {
                 deleteRecursive(dest);
                 executePaste(source, dest);
             });
-            builder.setNeutralButton("Rename", (dialog, which) ->
+            builder.setNeutralButton("重命名", (dialog, which) ->
                     executePaste(source, getUniqueDestination(currentDir, source.getName())));
-            builder.setNegativeButton("Cancel", null);
+            builder.setNegativeButton("取消", null);
             builder.show();
         } else {
             executePaste(source, dest);
@@ -919,7 +919,7 @@ public class FileManagerFragment extends Fragment {
 
     private void executePaste(File source, File dest) {
         if (isCutOperation && source.renameTo(dest)) {
-            Toast.makeText(getContext(), "Moved instantly", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "已立即移动", Toast.LENGTH_SHORT).show();
             finishPaste(true);
             return;
         }
@@ -940,10 +940,10 @@ public class FileManagerFragment extends Fragment {
                 new Handler(Looper.getMainLooper()).post(() -> {
                     dismissProgressDialog();
                     if (!isOperationCancelled) {
-                        Toast.makeText(getContext(), "Success!", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(getContext(), "成功！", Toast.LENGTH_SHORT).show();
                         finishPaste(isCutOperation);
                     } else {
-                        Toast.makeText(getContext(), "Cancelled", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(getContext(), "已取消", Toast.LENGTH_SHORT).show();
                         deleteRecursive(dest);
                         loadDirectory(currentDir);
                     }
@@ -952,7 +952,7 @@ public class FileManagerFragment extends Fragment {
                 final String errorMsg = e.getMessage();
                 new Handler(Looper.getMainLooper()).post(() -> {
                     dismissProgressDialog();
-                    Toast.makeText(getContext(), "Error: " + errorMsg + ". Source preserved.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(getContext(), "Error: " + errorMsg + "。源文件已保留。", Toast.LENGTH_LONG).show();
                     deleteRecursive(dest);
                     loadDirectory(currentDir);
                 });
@@ -994,7 +994,7 @@ public class FileManagerFragment extends Fragment {
         layout.addView(progressText);
 
         builder.setView(layout);
-        builder.setNegativeButton("Cancel", (d, w) -> isOperationCancelled = true);
+        builder.setNegativeButton("取消", (d, w) -> isOperationCancelled = true);
         progressDialog = builder.create();
         progressDialog.show();
     }
@@ -1078,13 +1078,13 @@ public class FileManagerFragment extends Fragment {
         final EditText input = new EditText(getContext());
         input.setText(file.getName());
         builder.setView(input);
-        builder.setPositiveButton("OK", (dialog, which) -> {
+        builder.setPositiveButton("确定", (dialog, which) -> {
             String newName = input.getText().toString();
             File newFile = new File(file.getParent(), newName);
             if (file.renameTo(newFile)) loadDirectory(currentDir);
-            else Toast.makeText(getContext(), "Rename failed", Toast.LENGTH_SHORT).show();
+            else Toast.makeText(getContext(), "重命名失败", Toast.LENGTH_SHORT).show();
         });
-        builder.setNegativeButton("Cancel", null);
+        builder.setNegativeButton("取消", null);
         builder.show();
     }
 
@@ -1121,11 +1121,11 @@ public class FileManagerFragment extends Fragment {
             new AlertDialog.Builder(getContext())
                     .setTitle("删除")
                     .setMessage("Are you sure you want to delete " + file.getName() + "?")
-                    .setPositiveButton("Yes", (d, w) -> {
+                    .setPositiveButton("是", (d, w) -> {
                         deleteRecursive(file);
                         loadDirectory(currentDir);
                     })
-                    .setNegativeButton("No", null)
+                    .setNegativeButton("否", null)
                     .show();
             return true;
         });

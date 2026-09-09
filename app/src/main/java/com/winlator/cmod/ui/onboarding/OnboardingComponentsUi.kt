@@ -172,7 +172,7 @@ internal fun OnboardingComponentsScreen(
                 horizontalArrangement = Arrangement.spacedBy(18.dp)
             ) {
                 Column(Modifier.weight(.9f).fillMaxHeight()) {
-                    Text("Choose components", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text("选择组件", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                     Text(
                         if (managerMode) "Install and manage runtime versions."
                         else "Install a Wine or Proton layer before continuing.",
@@ -189,7 +189,7 @@ internal fun OnboardingComponentsScreen(
                     if (category == "AdrenoTools") {
                         Spacer(Modifier.height(10.dp))
                         OutlinedButton(onClick = { cb.onBrowseDriver() }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Install local driver")
+                            Text("安装本地驱动")
                         }
                     }
                     if (showBundled) {
@@ -232,7 +232,7 @@ internal fun OnboardingComponentsScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 item {
-                    Text("Choose components", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                    Text("选择组件", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
                     Text(
                         if (managerMode) "Install and manage runtime versions."
                         else "Install as many versions as you want. At least one Wine or Proton is required.",
@@ -248,7 +248,7 @@ internal fun OnboardingComponentsScreen(
                     CategorySelector(category) { category = it }
                     if (category == "AdrenoTools") {
                         Spacer(Modifier.height(8.dp))
-                        OutlinedButton(onClick = { cb.onBrowseDriver() }) { Text("Install local driver") }
+                        OutlinedButton(onClick = { cb.onBrowseDriver() }) { Text("安装本地驱动") }
                     }
                     if (showBundled) {
                         Spacer(Modifier.height(10.dp))
@@ -416,12 +416,12 @@ private fun CoreComponentCard(
                 installed -> OutlinedButton(onClick = onRemove, enabled = !locked && !inUse) {
                     Icon(Icons.Outlined.DeleteOutline, null)
                     Spacer(Modifier.width(5.dp))
-                    Text(if (inUse) "In use" else "Delete")
+                    Text(if (inUse) "使用中" else "删除")
                 }
                 else -> OutlinedButton(onClick = onInstall, enabled = !locked) {
                     Icon(Icons.Outlined.Download, null)
                     Spacer(Modifier.width(5.dp))
-                    Text("Install")
+                    Text("安装")
                 }
             }
         }
@@ -467,10 +467,10 @@ private fun ComponentCard(
                     OutlinedButton(onClick = { cb.onRemove(item.id) }, enabled = !locked && !item.inUse) {
                         Icon(Icons.Outlined.DeleteOutline, null)
                         Spacer(Modifier.width(5.dp))
-                        Text(if (item.inUse) "In use" else "Delete")
+                        Text(if (item.inUse) "使用中" else "删除")
                     }
                 } else if (!item.installed) {
-                    OutlinedButton(onClick = { cb.onInstall(item.id) }, enabled = !locked) { Text("Download") }
+                    OutlinedButton(onClick = { cb.onInstall(item.id) }, enabled = !locked) { Text("下载") }
                 } else Icon(Icons.Outlined.Check, null)
             }
             if (busy) {
@@ -501,7 +501,7 @@ private fun InstallProgressCard(label: String?, progress: Int) {
                 Icon(Icons.Outlined.InsertDriveFile, null, modifier = Modifier.size(28.dp))
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Component installation", fontWeight = FontWeight.SemiBold)
+                    Text("组件安装", fontWeight = FontWeight.SemiBold)
                     Text(
                         if (progress >= 0) "${label ?: "Installing"} • ${progress}%"
                         else label ?: "Installing component…",
@@ -532,7 +532,7 @@ private fun LoadingCard() {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 3.dp)
             Spacer(Modifier.width(12.dp))
-            Text("Loading component catalog…")
+            Text("正在加载组件目录…")
         }
     }
 }
@@ -560,7 +560,7 @@ private fun ComponentsFooter(
                 onClick = back,
                 modifier = Modifier.weight(1f).height(48.dp),
                 shape = RoundedCornerShape(12.dp)
-            ) { Text("Back") }
+            ) { Text("返回") }
             Button(
                 onClick = next,
                 enabled = nextEnabled,

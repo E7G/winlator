@@ -176,7 +176,7 @@ private fun prepareInitialContainer(
     val contents = ContentsManager(activity).apply { syncContents() }
     val wineInfo = WineInfo.fromIdentifier(activity, contents, runtimeIdentifier)
     if (wineInfo.path.isNullOrBlank()) {
-        Toast.makeText(activity, "The selected Wine/Proton layer is no longer installed.", Toast.LENGTH_LONG).show()
+        Toast.makeText(activity, "所选 Wine/Proton 兼容层已不再安装。", Toast.LENGTH_LONG).show()
         return
     }
 
@@ -217,7 +217,7 @@ private fun prepareInitialContainer(
             preparing.value = false
             if (created == null) {
                 ready.value = false
-                Toast.makeText(activity, "Unable to create the first container.", Toast.LENGTH_LONG).show()
+                Toast.makeText(activity, "无法创建首个容器。", Toast.LENGTH_LONG).show()
             } else {
                 ready.value = true
             }
@@ -225,7 +225,7 @@ private fun prepareInitialContainer(
     } catch (_: Exception) {
         preparing.value = false
         ready.value = false
-        Toast.makeText(activity, "Unable to prepare the first container.", Toast.LENGTH_LONG).show()
+        Toast.makeText(activity, "无法准备首个容器。", Toast.LENGTH_LONG).show()
     }
 }
 

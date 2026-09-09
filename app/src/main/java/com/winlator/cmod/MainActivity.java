@@ -233,12 +233,12 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         new AlertDialog.Builder(this)
                 .setTitle("需要所有文件访问权限")
                 .setMessage("为了访问 USB 存储等额外存储设备，需要授予“所有文件访问”权限。点击“确定”前往 Android 设置授权。")
-                .setPositiveButton("Okay", (dialog, which) -> {
+                .setPositiveButton("确定", (dialog, which) -> {
                     Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
                     intent.setData(Uri.parse("package:" + getPackageName()));
                     startActivity(intent);
                 })
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton("取消", null)
                 .show();
     }
 

@@ -82,7 +82,7 @@ internal fun ContainerWrapperInline(containerId: Int, callbacks: ContainerInline
     }
 
     VCPanel {
-        Text("DirectX wrapper", Modifier.padding(horizontal = 12.dp, vertical = 9.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text("DirectX 封装", Modifier.padding(horizontal = 12.dp, vertical = 9.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         VCChoice("DX Wrapper", wrapper, wrapperEntries) { wrapper = it }
         VCDivider()
         if (StringUtils.parseIdentifier(wrapper).contains("dxvk", true)) {
@@ -104,7 +104,7 @@ internal fun ContainerWrapperInline(containerId: Int, callbacks: ContainerInline
             VCField("Video Memory (MB)", videoMemory) { videoMemory = it.filter(Char::isDigit).take(6) }
         }
         OutlinedButton(onClick = callbacks::onManageComponents, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp)) {
-            Text("Manage installed versions")
+            Text("管理已安装版本")
         }
         VCSave {
             val parsedWrapper = StringUtils.parseIdentifier(wrapper)
@@ -184,7 +184,7 @@ internal fun ContainerCompatibilityInline(containerId: Int, callbacks: Container
             VCPresetChoice("Box64 Preset", boxPreset, boxPresets.map { it.name }.toTypedArray(), boxPresets.map { it.id }.toTypedArray()) { boxPreset = it }
         }
         OutlinedButton(onClick = callbacks::onManageComponents, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp)) {
-            Text("Manage installed versions")
+            Text("管理已安装版本")
         }
         VCSave {
             container.setEmulator(if (arm64 && emulator32 == "FEXCore") "FEXCore" else "Box64")
@@ -261,7 +261,7 @@ private fun VCDownloadChoice(label: String, selected: String, entries: Array<Str
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(value, Modifier.weight(1f))
-                            if (!ready) Text("Download", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (!ready) Text("下载", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     },
                     onClick = { open = false; if (ready) onSelected(value) else callbacks.onInstallComponent(type, value) }
@@ -303,7 +303,7 @@ private fun VCToggle(label: String, checked: Boolean, onChange: (Boolean) -> Uni
 @Composable
 private fun VCSave(onClick: () -> Unit) {
     Button(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Text("Save", fontWeight = FontWeight.SemiBold)
+        Text("保存", fontWeight = FontWeight.SemiBold)
     }
 }
 

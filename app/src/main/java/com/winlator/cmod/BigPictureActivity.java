@@ -402,7 +402,7 @@ public class BigPictureActivity extends AppCompatActivity {
 
             playDefaultMp3FromAssets();
 
-            Toast.makeText(this, "MP3 reset to default", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "MP3 已恢复默认", Toast.LENGTH_SHORT).show();
         });
 
 
@@ -740,7 +740,7 @@ public class BigPictureActivity extends AppCompatActivity {
                             break;
                     }
                 })
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton("取消", null)
                 .show();
     }
 
@@ -920,7 +920,7 @@ public class BigPictureActivity extends AppCompatActivity {
         } else if (!containerValue.isEmpty()) {
             textView.setText(label + containerValue); // Fallback to the container's value
         } else {
-            textView.setText(label + "Not Set"); // Fallback if neither are available
+            textView.setText(label + "未设置"); // Fallback if neither are available
         }
     }
 
@@ -974,7 +974,7 @@ public class BigPictureActivity extends AppCompatActivity {
             }
 
             uploadText = new TextView(this); // Initialize the uploadText variable
-            uploadText.setText("No suitable cover art found for " + shortcut.name + ". Click the image to upload custom cover art or rename the Shortcut to something SteamGrid can recognize.");
+            uploadText.setText("No suitable cover art found for " + shortcut.name + "。点击图片可上传自定义封面，或将快捷方式重命名为 SteamGrid 能识别的名称。");
             uploadText.setTextColor(Color.WHITE);
             uploadText.setTextSize(18);
             uploadText.setPadding(20, 20, 20, 20);
@@ -1442,13 +1442,13 @@ public class BigPictureActivity extends AppCompatActivity {
     private void loadFramesFromFolder(Uri folderUri) {
         DocumentFile docFolder = DocumentFile.fromTreeUri(this, folderUri);
         if (docFolder == null || !docFolder.isDirectory()) {
-            Toast.makeText(this, "Invalid folder selected!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "选择的文件夹无效！", Toast.LENGTH_SHORT).show();
             return;
         }
 
         DocumentFile[] docFiles = docFolder.listFiles();
         if (docFiles == null || docFiles.length == 0) {
-            Toast.makeText(this, "No files in folder!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "文件夹中没有文件！", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -1467,7 +1467,7 @@ public class BigPictureActivity extends AppCompatActivity {
         }
 
         if (bitmaps.isEmpty()) {
-            Toast.makeText(this, "No PNG files found in this folder!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "此文件夹中未找到 PNG 文件！", Toast.LENGTH_SHORT).show();
             return;
         }
 
