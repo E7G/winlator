@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - sync/ludashi-4.0-zh
+      - fix/zh-cn-downloads-v2
   workflow_dispatch:
 
 permissions:
