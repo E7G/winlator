@@ -7,6 +7,7 @@ BASE_DIR = Path('app/src/main/res/values')
 ZH_DIR = Path('app/src/main/res/values-zh-rCN')
 
 string_re = re.compile(r'<string\s+name="([^"]+)"[^>]*>(.*?)</string>', re.S)
+cjk_re = re.compile(r'[\u3400-\u4dbf\u4e00-\u9fff]')
 
 def read_dir(root):
     out = {}
@@ -31,13 +32,24 @@ print(f'Obsolete/extra Chinese strings: {len(extra)}')
 for key in extra:
     print(f'EXTRA\t{key}')
 
-# Technical/product literals that should not be translated.
+# Product names, APIs and low-level graphics/runtime identifiers are intentionally kept unchanged.
 allowed_literals = {
-    'Winlator', 'Winlator CMOD', 'YouTube', 'FPS', 'GPU', 'CPU', 'ReShade', 'DirectInput',
+    'Winlator', 'Winlator CMOD', 'YouTube', 'FPS', 'GPU', 'CPU', 'RAM', 'HUD',
+    'Wine', 'Proton', 'DXVK', 'VKD3D', 'Box64', 'Vulkan', 'Turnip', 'ReShade', 'DirectInput',
     'Drive D:', '/storage/emulated/0/Download', 'FolderName', 'default_version',
     '-force-gfx-direct', '-force-d3d11-singlethreaded', '-force-dx9', '-force-d3d9', '-force-d3d11',
     '--force-gfx-direct', '--force-d3d11-singlethreaded', '--force-dx9', '--force-d3d9', '--force-d3d11',
 }
+
+def looks_unlocalized(val):
+    val = val.strip()
+    if not val or val in allowed_literals:
+        return False
+    # A Chinese sentence may legitimately contain Proton/DXVK/FPS/GitHub etc.; it is localized.
+    if cjk_re.search(val):
+        return False
+    return bool(re.search(r'[A-Za-z]{3,}', val))
+
 attrs = ('text', 'hint', 'title', 'summary', 'contentDescription')
 attr_re = re.compile(r'android:(?:' + '|'.join(attrs) + r')="([^"@?][^"]*)"')
 xml_hits = []
@@ -49,9 +61,7 @@ for root in [Path('app/src/main/res/layout'), Path('app/src/main/res/layout-land
         for i, line in enumerate(txt.splitlines(), 1):
             for m in attr_re.finditer(line):
                 val = m.group(1).strip()
-                if val in allowed_literals:
-                    continue
-                if re.search(r'[A-Za-z]{3,}', val):
+                if looks_unlocalized(val):
                     xml_hits.append((str(p), i, val))
 
 print(f'Unlocalized XML English candidates: {len(xml_hits)}')
@@ -66,7 +76,7 @@ for p in Path('app/src/main/java').rglob('*.java'):
     for i, line in enumerate(txt.splitlines(), 1):
         for m in ui_call.finditer(line):
             val = m.group(1).strip()
-            if val and val not in allowed_literals and re.search(r'[A-Za-z]{3,}', val):
+            if looks_unlocalized(val):
                 java_hits.append((str(p), i, val))
 print(f'Hard-coded Java UI English candidates: {len(java_hits)}')
 for p, line, val in java_hits:
