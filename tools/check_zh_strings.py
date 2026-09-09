@@ -64,6 +64,9 @@ def looks_unlocalized(val):
         return False
     if val.startswith(('http://', 'https://', '/', '@', '${')):
         return False
+    # Short all-caps technical abbreviations such as PID:, PID：, GPU, FPS are labels, not prose.
+    if re.fullmatch(r'[A-Z0-9]{2,}[\s:：-]*', val):
+        return False
     if re.fullmatch(r'[\d\s.,:+%xX_()/\\-]+', val):
         return False
     return bool(re.search(r'[A-Za-z]{3,}', val))
