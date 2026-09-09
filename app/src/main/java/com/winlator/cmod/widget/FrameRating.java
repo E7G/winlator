@@ -154,6 +154,6 @@ public class FrameRating extends FrameLayout implements Runnable {
         if (!userEnabled) return;
         if (getVisibility() == GONE) setVisibility(View.VISIBLE);
         tvFPS.setText(String.format(Locale.ENGLISH, "%.1f", lastFPS));
-        tvRAM.setText(getAvailableRAM() + " GB Used / " + totalRAM + " Total");
+        tvRAM.setText(getAvailableRAM() + " 已用 GB / " + totalRAM + " 总计");
     }
 }

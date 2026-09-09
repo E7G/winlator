@@ -813,7 +813,7 @@ public class FileManagerFragment extends Fragment {
             intent.putExtra("shortcut_path", tempShortcut.getAbsolutePath());
             startActivity(intent);
         } catch (Exception e) {
-            Toast.makeText(getContext(), "Error launching: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(getContext(), "启动失败： " + e.getMessage(), Toast.LENGTH_LONG).show();
             e.printStackTrace();
         }
     }
@@ -871,7 +871,7 @@ public class FileManagerFragment extends Fragment {
         this.clipboardFile = file;
         this.isCutOperation = isCut;
         if (fabPaste != null) fabPaste.setVisibility(View.VISIBLE);
-        Toast.makeText(getContext(), (isCut ? "Cut: " : "Copied: ") + file.getName(), Toast.LENGTH_SHORT).show();
+        Toast.makeText(getContext(), (isCut ? "已剪切： " : "已复制： ") + file.getName(), Toast.LENGTH_SHORT).show();
     }
 
     private void startPasteOperation() {
@@ -924,7 +924,7 @@ public class FileManagerFragment extends Fragment {
             return;
         }
 
-        showProgressDialog(isCutOperation ? "Moving..." : "Copying...");
+        showProgressDialog(isCutOperation ? "正在移动…" : "正在复制…");
         isOperationCancelled = false;
         new Thread(() -> {
             try {
@@ -952,7 +952,7 @@ public class FileManagerFragment extends Fragment {
                 final String errorMsg = e.getMessage();
                 new Handler(Looper.getMainLooper()).post(() -> {
                     dismissProgressDialog();
-                    Toast.makeText(getContext(), "Error: " + errorMsg + "。源文件已保留。", Toast.LENGTH_LONG).show();
+                    Toast.makeText(getContext(), "错误： " + errorMsg + "。源文件已保留。", Toast.LENGTH_LONG).show();
                     deleteRecursive(dest);
                     loadDirectory(currentDir);
                 });
@@ -1120,7 +1120,7 @@ public class FileManagerFragment extends Fragment {
         popup.getMenu().add("Delete").setOnMenuItemClickListener(item -> {
             new AlertDialog.Builder(getContext())
                     .setTitle("删除")
-                    .setMessage("Are you sure you want to delete " + file.getName() + "?")
+                    .setMessage("确定要删除 " + file.getName() + "?")
                     .setPositiveButton("是", (d, w) -> {
                         deleteRecursive(file);
                         loadDirectory(currentDir);

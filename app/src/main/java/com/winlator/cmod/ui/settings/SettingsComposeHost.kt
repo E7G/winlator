@@ -185,12 +185,12 @@ private fun SettingsScreen(model: SettingsModel, callbacks: SettingsCallbacks) {
 
             item("environment-title") { SectionTitle("运行环境") }
             item("containers") {
-                NavigationRow(Icons.Outlined.Dns, "容器", "Create and manage Windows environments") {
+                NavigationRow(Icons.Outlined.Dns, "容器", "创建和管理 Windows 运行环境") {
                     context.startActivity(Intent(context, ContainersSettingsActivity::class.java))
                 }
             }
             item("components") {
-                NavigationRow(Icons.Outlined.Apps, "Components", "Wine, Proton, DXVK, VKD3D and runtimes", callbacks::onOpenComponents)
+                NavigationRow(Icons.Outlined.Apps, "组件", "Wine、Proton、DXVK、VKD3D 与运行组件", callbacks::onOpenComponents)
             }
 
             item("presets-title") { SectionTitle("预设") }

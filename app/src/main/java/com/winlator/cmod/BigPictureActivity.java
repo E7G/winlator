@@ -853,8 +853,8 @@ public class BigPictureActivity extends AppCompatActivity {
         SharedPreferences playtimePrefs = getSharedPreferences("playtime_stats", Context.MODE_PRIVATE);
         long totalPlaytime = playtimePrefs.getLong(shortcut.name + "_playtime", 0);
         int playCount = playtimePrefs.getInt(shortcut.name + "_play_count", 0);
-        playCountView.setText("Times Played: " + playCount);
-        playtimeView.setText("Playtime: " + formatPlaytime(totalPlaytime));
+        playCountView.setText("游玩次数： " + playCount);
+        playtimeView.setText("游玩时长： " + formatPlaytime(totalPlaytime));
 
         Container container = manager.getContainerForShortcut(shortcut);
         String graphicsDriver = shortcut.getExtra("graphicsDriver");
@@ -974,7 +974,7 @@ public class BigPictureActivity extends AppCompatActivity {
             }
 
             uploadText = new TextView(this); // Initialize the uploadText variable
-            uploadText.setText("No suitable cover art found for " + shortcut.name + "。点击图片可上传自定义封面，或将快捷方式重命名为 SteamGrid 能识别的名称。");
+            uploadText.setText("未找到适合的封面： " + shortcut.name + "。点击图片可上传自定义封面，或将快捷方式重命名为 SteamGrid 能识别的名称。");
             uploadText.setTextColor(Color.WHITE);
             uploadText.setTextSize(18);
             uploadText.setPadding(20, 20, 20, 20);

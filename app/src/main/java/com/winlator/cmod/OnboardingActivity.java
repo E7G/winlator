@@ -251,7 +251,7 @@ public class OnboardingActivity extends AppCompatActivity {
                 composeController.setInstallBusy(null, false);
                 refreshBundledRuntimeState();
                 syncComposeCatalog();
-                if (!installed) Toast.makeText(this, "Unable to install " + BUNDLED_RUNTIME_NAME + ".", Toast.LENGTH_LONG).show();
+                if (!installed) Toast.makeText(this, "无法安装 " + BUNDLED_RUNTIME_NAME + ".", Toast.LENGTH_LONG).show();
             });
         });
     }
@@ -261,13 +261,13 @@ public class OnboardingActivity extends AppCompatActivity {
         if (using != null) {
             new AlertDialog.Builder(this)
                     .setTitle("Proton 正在使用")
-                    .setMessage(BUNDLED_RUNTIME_NAME + " cannot be deleted because it is used by " + using + ".")
+                    .setMessage(BUNDLED_RUNTIME_NAME + " 因正在被以下项目使用而无法删除 " + using + ".")
                     .setPositiveButton(android.R.string.ok, null)
                     .show();
             return;
         }
         new AlertDialog.Builder(this)
-                .setTitle("Delete " + BUNDLED_RUNTIME_NAME + "?")
+                .setTitle("删除 " + BUNDLED_RUNTIME_NAME + "?")
                 .setMessage("内置 Proton 文件将被删除，之后可以重新安装。")
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton("删除", (dialog, which) -> removeBundledRuntime())
@@ -284,7 +284,7 @@ public class OnboardingActivity extends AppCompatActivity {
                 installBusy = false;
                 composeController.setInstallBusy(null, false);
                 refreshBundledRuntimeState();
-                if (!removed) Toast.makeText(this, BUNDLED_RUNTIME_NAME + " could not be deleted.", Toast.LENGTH_LONG).show();
+                if (!removed) Toast.makeText(this, BUNDLED_RUNTIME_NAME + " 删除失败。", Toast.LENGTH_LONG).show();
             });
         });
     }
@@ -648,7 +648,7 @@ public class OnboardingActivity extends AppCompatActivity {
             String using = WineRuntimeGuard.getContainerUsing(this, ContentsManager.getEntryName(profile));
             new AlertDialog.Builder(this)
                     .setTitle("运行环境正在使用")
-                    .setMessage(profile.verName + " cannot be deleted because it is used by " + using + ".")
+                    .setMessage(profile.verName + " 因正在被以下项目使用而无法删除 " + using + ".")
                     .setPositiveButton(android.R.string.ok, null)
                     .show();
             return;
@@ -667,7 +667,7 @@ public class OnboardingActivity extends AppCompatActivity {
         if (using != null) {
             new AlertDialog.Builder(this)
                     .setTitle("运行环境正在使用")
-                    .setMessage(item.name + " cannot be deleted because it is used by " + using + ".")
+                    .setMessage(item.name + " 因正在被以下项目使用而无法删除 " + using + ".")
                     .setPositiveButton(android.R.string.ok, null)
                     .show();
             return;
@@ -755,7 +755,7 @@ public class OnboardingActivity extends AppCompatActivity {
                 composeController.setInstallBusy(null, false);
                 syncComposeCatalog();
                 if (installed == null || installed.isEmpty()) {
-                    Toast.makeText(this, "Unable to install " + driver.name + ".", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "无法安装 " + driver.name + ".", Toast.LENGTH_LONG).show();
                 }
             });
         });

@@ -150,7 +150,7 @@ public class TaskManagerSidebar implements OnGetProcessInfoListener {
                 if (container == null) return;
 
                 TextView title = rootView.findViewById(R.id.TVProcessesTitle);
-                if (title != null) title.setText("Processes: " + numProcesses);
+                if (title != null) title.setText("进程： " + numProcesses);
 
                 View empty = rootView.findViewById(R.id.TVEmptyText);
                 if (numProcesses == 0) {
@@ -167,7 +167,7 @@ public class TaskManagerSidebar implements OnGetProcessInfoListener {
 
                 ((TextView) itemView.findViewById(R.id.TVName)).setText(
                         processInfo.name + (processInfo.wow64Process ? " *32" : ""));
-                ((TextView) itemView.findViewById(R.id.TVPID)).setText("PID: " + processInfo.pid);
+                ((TextView) itemView.findViewById(R.id.TVPID)).setText("PID： " + processInfo.pid);
                 ((TextView) itemView.findViewById(R.id.TVMemoryUsage)).setText(
                         processInfo.getFormattedMemoryUsage());
 

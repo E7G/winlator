@@ -486,7 +486,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
         if (creating || state.runtime.isBlank()) return
         val wineInfo = WineInfo.fromIdentifier(context, contents, state.runtime)
         if (wineInfo.path.isNullOrBlank()) {
-            Toast.makeText(context, "Selected Wine/Proton is not installed.", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "所选 Wine/Proton 尚未安装。", Toast.LENGTH_LONG).show()
             return
         }
         creating = true

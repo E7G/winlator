@@ -140,7 +140,7 @@ public class AdrenotoolsFragment extends Fragment {
         if (getContext() == null) return;
 
         File cacheDir = getContext().getCacheDir();
-        Toast.makeText(getContext(), "Downloading " + item.name + "...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(getContext(), "正在下载 " + item.name + "...", Toast.LENGTH_SHORT).show();
 
         Executors.newSingleThreadExecutor().execute(() -> {
             File tmpFile = new File(cacheDir, "driver_update.zip");
@@ -155,7 +155,7 @@ public class AdrenotoolsFragment extends Fragment {
 
                 String installedName = adrenotoolsManager.installDriver(Uri.fromFile(tmpFile));
                 if (!installedName.isEmpty()) {
-                    Toast.makeText(getContext(), "Installed: " + installedName, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getContext(), "已安装： " + installedName, Toast.LENGTH_SHORT).show();
                     RecyclerView.Adapter adapter = recyclerView.getAdapter();
                     if (adapter instanceof DriversAdapter) {
                         ((DriversAdapter)adapter).reloadList();
