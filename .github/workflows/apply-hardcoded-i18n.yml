@@ -6,6 +6,7 @@ on:
       - fix/zh-cn-downloads-v2
     paths:
       - tools/apply_zh_hardcoded_ui.py
+      - tools/apply_zh_hardcoded_ui_pass2.py
       - .github/workflows/apply-hardcoded-i18n.yml
   workflow_dispatch:
 
@@ -20,10 +21,14 @@ jobs:
         with:
           ref: fix/zh-cn-downloads-v2
           fetch-depth: 0
-      - name: Validate localization script
-        run: python3 -m py_compile tools/apply_zh_hardcoded_ui.py
+      - name: Validate localization scripts
+        run: |
+          python3 -m py_compile tools/apply_zh_hardcoded_ui.py
+          python3 -m py_compile tools/apply_zh_hardcoded_ui_pass2.py
       - name: Apply localized UI literals
-        run: python3 tools/apply_zh_hardcoded_ui.py
+        run: |
+          python3 tools/apply_zh_hardcoded_ui.py
+          python3 tools/apply_zh_hardcoded_ui_pass2.py
       - name: Commit localized sources
         run: |
           if git diff --quiet; then
@@ -33,5 +38,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java
-          git commit -m "fix(i18n): localize hardcoded Java and Compose UI"
+          git commit -m "fix(i18n): finish hardcoded Java and Compose UI localization"
           git push origin HEAD:fix/zh-cn-downloads-v2
