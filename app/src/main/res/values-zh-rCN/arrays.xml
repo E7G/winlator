@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Only display arrays are overridden here. Protocol/runtime value arrays stay in values/arrays.xml. -->
+    <string-array name="screen_size_entries">
+        <item>自定义</item>
+        <item>640x360 (16:9)</item>
+        <item>780x360 (19.5:9)</item>
+        <item>640x480 (4:3)</item>
+        <item>800x600 (4:3)</item>
+        <item>854x480 (16:9)</item>
+        <item>960x544 (16:9)</item>
+        <item>1024x768 (4:3)</item>
+        <item>1280x576 (20:9)</item>
+        <item>1280x720 (16:9)</item>
+        <item>1280x1024 (5:4)</item>
+        <item>1366x768 (16:9)</item>
+        <item>1440x900 (16:10)</item>
+        <item>1600x720 (20:9)</item>
+        <item>1600x900 (16:9)</item>
+        <item>1920x1080 (16:9)</item>
+    </string-array>
+
+    <string-array name="binding_type_entries">
+        <item>键盘</item>
+        <item>鼠标</item>
+        <item>手柄</item>
+    </string-array>
+
+    <string-array name="dxvk_max_device_memory_entries">
+        <item>0（默认）</item>
+        <item>512 MB</item>
+        <item>1024 MB</item>
+        <item>2048 MB</item>
+        <item>4096 MB</item>
+    </string-array>
+
+    <string-array name="device_memory_entries">
+        <item>0（默认）</item>
+        <item>512 MB</item>
+        <item>1024 MB</item>
+        <item>2048 MB</item>
+        <item>4096 MB</item>
+        <item>8192 MB</item>
+        <item>12288 MB</item>
+        <item>16384 MB</item>
+    </string-array>
+
+    <string-array name="wincomponent_entries">
+        <item>内置（Wine）</item>
+        <item>原生（Windows）</item>
+    </string-array>
+
+    <string-array name="desktop_theme_entries">
+        <item>浅色</item>
+        <item>深色</item>
+    </string-array>
+
+    <string-array name="desktop_background_type_entries">
+        <item>图片</item>
+        <item>纯色</item>
+    </string-array>
+
+    <string-array name="startup_selection_entries">
+        <item>正常（加载所有服务）</item>
+        <item>精简（仅加载必要服务）</item>
+        <item>激进（启动时停止服务）</item>
+    </string-array>
+
+    <string-array name="button_options">
+        <item>A</item>
+        <item>B</item>
+        <item>X</item>
+        <item>Y</item>
+        <item>R1（右肩键）</item>
+        <item>R2（右扳机）</item>
+        <item>L1（左肩键）</item>
+        <item>L2（左扳机）</item>
+        <item>开始</item>
+        <item>选择</item>
+        <item>R3（右摇杆按键）</item>
+        <item>L3（左摇杆按键）</item>
+    </string-array>
+
+    <string-array name="touchscreenInputModesEntries">
+        <item>触控板</item>
+        <item>模拟触摸屏</item>
+        <item>直接触摸</item>
+    </string-array>
+
+    <string-array name="transformCapturedPointerEntries">
+        <item>不旋转</item>
+        <item>顺时针</item>
+        <item>逆时针</item>
+        <item>上下翻转</item>
+        <item>自动（触控板）</item>
+    </string-array>
+</resources>
