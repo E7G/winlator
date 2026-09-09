@@ -3,6 +3,7 @@ package com.winlator.cmod.core;
 import android.content.Context;
 import android.util.Log;
 
+import com.winlator.cmod.contents.Downloader;
 import com.winlator.cmod.xenvironment.ImageFs;
 import com.winlator.cmod.xenvironment.ImageFsInstaller;
 
@@ -15,17 +16,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
-import okhttp3.ResponseBody;
-
 public abstract class ProtonPackageManager {
     private static final String TAG = "ProtonPackageManager";
     public static final String DEFAULT_IDENTIFIER = "proton-9.0-arm64ec";
     private static final String RELEASE_BASE_URL = "https://github.com/Other-backup/winlator-imagefs/releases/download/protons-zst-latest/";
     private static final String RELEASE_D_BASE_URL = "https://github.com/Other-backup/winlator-imagefs-v2/releases/download/d/";
-    private static final OkHttpClient HTTP = new OkHttpClient();
 
     public static class PackageInfo {
         public final String identifier;
@@ -111,6 +106,7 @@ public abstract class ProtonPackageManager {
 
         long totalSize = 0;
         for (long size : packageInfo.partSizes) totalSize += size;
+        final long totalExpectedSize = totalSize;
         long downloadedSize = 0;
         FileUtils.delete(output);
 
@@ -120,40 +116,48 @@ public abstract class ProtonPackageManager {
                         ? packageInfo.directUrl
                         : RELEASE_BASE_URL + packageInfo.fileName + "." + String.format("%02d", i);
                 long expectedPartSize = packageInfo.partSizes[i];
-                long downloadedPartSize = 0;
+                File partFile = new File(output.getAbsolutePath() + ".part-" + i);
+                FileUtils.delete(partFile);
+                final long completedBeforePart = downloadedSize;
 
-                Request request = new Request.Builder().url(address).build();
-                try (Response response = HTTP.newCall(request).execute()) {
-                    ResponseBody body = response.body();
-                    if (!response.isSuccessful() || body == null) {
-                        throw new IllegalStateException("HTTP " + response.code() + " while downloading " + packageInfo.fileName);
+                boolean downloaded = Downloader.downloadFile(address, partFile, partProgress -> {
+                    if (progressCallback != null && totalExpectedSize > 0) {
+                        long currentPart = expectedPartSize > 0
+                                ? expectedPartSize * partProgress / 100
+                                : 0;
+                        int overall = Math.min(99, (int) ((completedBeforePart + currentPart) * 100 / totalExpectedSize));
+                        progressCallback.call(overall);
                     }
-
-                    try (InputStream inputStream = body.byteStream()) {
-                        byte[] data = new byte[64 * 1024];
-                        int count;
-                        while ((count = inputStream.read(data)) != -1) {
-                            outputStream.write(data, 0, count);
-                            downloadedPartSize += count;
-                            downloadedSize += count;
-                            if (progressCallback != null && totalSize > 0) {
-                                progressCallback.call(Math.min(100, (int)(downloadedSize * 100 / totalSize)));
-                            }
-                        }
-                    }
+                });
+                if (!downloaded) {
+                    FileUtils.delete(partFile);
+                    throw new IllegalStateException("Unable to download " + packageInfo.fileName + " part " + i);
                 }
 
+                long downloadedPartSize = partFile.length();
                 if (expectedPartSize > 0 && downloadedPartSize != expectedPartSize) {
+                    FileUtils.delete(partFile);
                     throw new IllegalStateException(
                             "Size mismatch for " + packageInfo.fileName + " part " + i
                                     + ": expected " + expectedPartSize + ", got " + downloadedPartSize
                     );
                 }
+
+                try (InputStream inputStream = new FileInputStream(partFile)) {
+                    byte[] data = new byte[64 * 1024];
+                    int count;
+                    while ((count = inputStream.read(data)) != -1) outputStream.write(data, 0, count);
+                } finally {
+                    FileUtils.delete(partFile);
+                }
+                downloadedSize += downloadedPartSize;
             }
             outputStream.flush();
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             Log.e(TAG, "Unable to download " + packageInfo.identifier, e);
+            for (int i = 0; i < packageInfo.partSizes.length; i++) {
+                FileUtils.delete(new File(output.getAbsolutePath() + ".part-" + i));
+            }
             FileUtils.delete(output);
             return false;
         }
@@ -186,8 +190,7 @@ public abstract class ProtonPackageManager {
             StringBuilder hex = new StringBuilder(hash.length * 2);
             for (byte value : hash) hex.append(String.format("%02x", value & 0xff));
             return expected.equalsIgnoreCase(hex.toString());
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             Log.e(TAG, "Unable to verify SHA-256 for " + file, e);
             return false;
         }
