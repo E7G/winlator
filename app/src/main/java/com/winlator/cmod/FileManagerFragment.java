@@ -102,7 +102,7 @@ public class FileManagerFragment extends Fragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         if (getActivity() != null && ((AppCompatActivity) getActivity()).getSupportActionBar() != null) {
-            ((AppCompatActivity) getActivity()).getSupportActionBar().setTitle("File Manager");
+            ((AppCompatActivity) getActivity()).getSupportActionBar().setTitle("文件管理器");
         }
     }
 
@@ -496,8 +496,8 @@ public class FileManagerFragment extends Fragment {
         ArrayList<Container> containers = containerManager.getContainers();
         if (containers == null || containers.isEmpty()) {
             new AlertDialog.Builder(getContext())
-                    .setTitle("No Containers")
-                    .setMessage("You need to create a container first to access Drive C:.")
+                    .setTitle("没有容器")
+                    .setMessage("需要先创建容器才能访问 C: 盘。")
                     .setPositiveButton("OK", null)
                     .show();
             return;
@@ -509,7 +509,7 @@ public class FileManagerFragment extends Fragment {
             String[] names = new String[containers.size()];
             for (int i = 0; i < containers.size(); i++) names[i] = containers.get(i).getName();
             new AlertDialog.Builder(getContext())
-                    .setTitle("Select Container Drive C:")
+                    .setTitle("选择容器 C: 盘")
                     .setItems(names, (dialog, which) -> navigateToContainerDriveC(containers.get(which)))
                     .show();
         }
@@ -523,7 +523,7 @@ public class FileManagerFragment extends Fragment {
             Toast.makeText(getContext(), "Opened C: (" + container.getName() + ")", Toast.LENGTH_SHORT).show();
         } else {
             new AlertDialog.Builder(getContext())
-                    .setTitle("Drive C: Not Initialized")
+                    .setTitle("C: 盘尚未初始化")
                     .setMessage("The Wine system files (Drive C:) for '" + container.getName() + "' are missing.\n\n" +
                             "Please RUN this container once to generate the filesystem.")
                     .setPositiveButton("OK", null)
@@ -585,16 +585,16 @@ public class FileManagerFragment extends Fragment {
         String path = normalizeFilePath(dir.getAbsolutePath());
         String primary = normalizeFilePath(Environment.getExternalStorageDirectory().getAbsolutePath());
         if (path.contains("/.wine/drive_c")) {
-            tvDriveName.setText("Drive C:");
+            tvDriveName.setText("C: 盘");
             ivDriveIcon.setImageResource(R.drawable.icon_wine);
         } else if (path.equals(primary) || path.startsWith(primary + File.separator)) {
             tvDriveName.setText("Drive D:");
             ivDriveIcon.setImageResource(R.drawable.ic_internal_storage);
         } else if (path.startsWith("/storage/") && !path.startsWith("/storage/emulated")) {
-            tvDriveName.setText("External Storage");
+            tvDriveName.setText("外部存储");
             ivDriveIcon.setImageResource(R.drawable.ic_internal_storage);
         } else {
-            tvDriveName.setText("Drive Z:");
+            tvDriveName.setText("Z: 盘");
             ivDriveIcon.setImageResource(android.R.drawable.ic_menu_manage);
         }
     }
@@ -612,7 +612,7 @@ public class FileManagerFragment extends Fragment {
             String[] names = new String[containers.size()];
             for (int i = 0; i < containers.size(); i++) names[i] = containers.get(i).getName();
             new AlertDialog.Builder(getContext())
-                    .setTitle("Select Container")
+                    .setTitle("选择容器")
                     .setItems(names, (dialog, which) -> action.onContainerSelected(containers.get(which)))
                     .show();
         }
@@ -884,7 +884,7 @@ public class FileManagerFragment extends Fragment {
         File dest = new File(currentDir, source.getName());
         if (dest.exists()) {
             AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
-            builder.setTitle("File Conflict");
+            builder.setTitle("文件冲突");
             builder.setMessage("The destination \"" + dest.getName() + "\" already exists.");
             builder.setPositiveButton("Replace", (dialog, which) -> {
                 deleteRecursive(dest);
@@ -989,7 +989,7 @@ public class FileManagerFragment extends Fragment {
         layout.addView(progressBar);
 
         progressText = new TextView(getContext());
-        progressText.setText("Calculating...");
+        progressText.setText("正在计算…");
         progressText.setPadding(0, 20, 0, 0);
         layout.addView(progressText);
 
@@ -1074,7 +1074,7 @@ public class FileManagerFragment extends Fragment {
 
     private void renameFile(File file) {
         AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
-        builder.setTitle("Rename");
+        builder.setTitle("重命名");
         final EditText input = new EditText(getContext());
         input.setText(file.getName());
         builder.setView(input);
@@ -1119,7 +1119,7 @@ public class FileManagerFragment extends Fragment {
         });
         popup.getMenu().add("Delete").setOnMenuItemClickListener(item -> {
             new AlertDialog.Builder(getContext())
-                    .setTitle("Delete")
+                    .setTitle("删除")
                     .setMessage("Are you sure you want to delete " + file.getName() + "?")
                     .setPositiveButton("Yes", (d, w) -> {
                         deleteRecursive(file);

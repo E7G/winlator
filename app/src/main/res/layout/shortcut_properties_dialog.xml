@@ -9,7 +9,7 @@
         android:id="@+id/play_count"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Number of times played: "
+        android:text="@string/zh_hc_number_of_times_played_5d882350"
         android:textSize="16sp"
         android:paddingBottom="8dp" />
 
@@ -17,7 +17,7 @@
         android:id="@+id/playtime"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Playtime: "
+        android:text="@string/zh_hc_playtime_87c7e7f9"
         android:textSize="16sp"
         android:paddingBottom="8dp" />
 

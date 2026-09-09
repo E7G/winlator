@@ -45,7 +45,7 @@ public class RepositoryManagerDialog {
 
     public void show() {
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle("Driver Sources"); // English
+        builder.setTitle("驱动源"); // English
 
         recyclerView = new RecyclerView(context);
         recyclerView.setBackgroundColor(Color.BLACK);
@@ -71,11 +71,11 @@ public class RepositoryManagerDialog {
         builder.setTitle(repoToEdit == null ? "Add Repository" : "Edit Repository");
 
         final EditText inputName = new EditText(context);
-        inputName.setHint("Name (e.g. Turnip Drivers)");
+        inputName.setHint("名称（例如 Turnip 驱动）");
         if (repoToEdit != null) inputName.setText(repoToEdit.name);
         
         final EditText inputUrl = new EditText(context);
-        inputUrl.setHint("GitHub API URL");
+        inputUrl.setHint("GitHub API 地址");
         if (repoToEdit != null) inputUrl.setText(repoToEdit.apiUrl);
 
         android.widget.LinearLayout layout = new android.widget.LinearLayout(context);

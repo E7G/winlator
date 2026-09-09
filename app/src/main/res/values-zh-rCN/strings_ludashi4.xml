@@ -18,4 +18,6 @@
     <string name="arguments">启动参数</string>
     <string name="game_folder">游戏文件夹</string>
     <string name="magnifier_not_available">DisplayX 模式下无法使用放大镜</string>
+    <string name="zh_hc_number_of_times_played_5d882350" formatted="false">游玩次数：</string>
+    <string name="zh_hc_playtime_87c7e7f9" formatted="false">游玩时长：</string>
 </resources>

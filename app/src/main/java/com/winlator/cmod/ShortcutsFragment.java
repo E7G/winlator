@@ -651,7 +651,7 @@ public class ShortcutsFragment extends Fragment {
             ContainerManager containerManager = new ContainerManager(context);
             ArrayList<Container> containers = containerManager.getContainers();
             AlertDialog.Builder builder = new AlertDialog.Builder(context);
-            builder.setTitle("Select a container");
+            builder.setTitle("选择容器");
             String[] containerNames = new String[containers.size()];
             for (int i = 0; i < containers.size(); i++) {
                 containerNames[i] = containers.get(i).getName();

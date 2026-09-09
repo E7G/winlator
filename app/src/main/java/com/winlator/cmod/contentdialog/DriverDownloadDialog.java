@@ -48,7 +48,7 @@ public class DriverDownloadDialog {
 
     public void show() {
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle("Available Drivers"); // English
+        builder.setTitle("可用驱动"); // English
 
         recyclerView = new RecyclerView(context);
         recyclerView.setBackgroundColor(Color.BLACK);
@@ -139,7 +139,7 @@ public class DriverDownloadDialog {
             }
 
             new AlertDialog.Builder(context)
-                .setTitle("Select Variant")
+                .setTitle("选择版本")
                 .setItems(assetNames, (dialogInterface, which) -> {
                     startDownload(item.assets.get(which));
                 })

@@ -84,7 +84,7 @@ public class ImagePickerView extends View implements View.OnClickListener {
 
         wallpaperSection.setVisibility(VISIBLE);
         TextView title = wallpaperSection.findViewById(R.id.TVDesktop);
-        if (title != null) title.setText("Wallpaper");
+        if (title != null) title.setText("壁纸");
 
         int oldIndex = generalTab.indexOfChild(wallpaperSection);
         if (oldIndex > 0) {
@@ -117,7 +117,7 @@ public class ImagePickerView extends View implements View.OnClickListener {
         row.setPadding(0, dp(8), 0, 0);
 
         TextView label = new TextView(getContext());
-        label.setText("Wallpaper image");
+        label.setText("壁纸图片");
         label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 

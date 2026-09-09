@@ -73,7 +73,7 @@ public class FpsLimiterControl extends LinearLayout {
         sliderGroup.addView(valueRow, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(context);
-        title.setText("FPS Limit");
+        title.setText("FPS 限制");
         title.setTextColor(onSurface);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
@@ -98,7 +98,7 @@ public class FpsLimiterControl extends LinearLayout {
         customValue.setSingleLine(true);
         customValue.setInputType(InputType.TYPE_CLASS_NUMBER);
         customValue.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        customValue.setHint("Enter custom FPS");
+        customValue.setHint("输入自定义 FPS");
         customValue.setTextColor(onSurface);
         customValue.setHintTextColor(onSurfaceVariant);
         customValue.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
@@ -288,8 +288,8 @@ public class FpsLimiterControl extends LinearLayout {
         boolean customMode = position >= CUSTOM_POSITION;
         customValue.setVisibility(customMode ? VISIBLE : GONE);
 
-        if (position <= 0) valueLabel.setText("Off");
-        else if (customMode) valueLabel.setText("Custom");
+        if (position <= 0) valueLabel.setText("关闭");
+        else if (customMode) valueLabel.setText("自定义");
         else valueLabel.setText((position * STEP_FPS) + " FPS");
     }
 

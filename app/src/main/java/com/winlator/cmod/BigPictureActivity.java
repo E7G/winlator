@@ -606,9 +606,9 @@ public class BigPictureActivity extends AppCompatActivity {
 
     private void updateBgMusicButtonText(Button button, boolean isEnabled) {
         if (isEnabled) {
-            button.setText("Disable BG Music");
+            button.setText("关闭背景音乐");
         } else {
-            button.setText("Enable BG Music");
+            button.setText("启用背景音乐");
         }
     }
 
@@ -729,7 +729,7 @@ public class BigPictureActivity extends AppCompatActivity {
 
     private void showCoverArtOptionsDialog() {
         new androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("Cover Art Options")
+                .setTitle("封面选项")
                 .setItems(new CharSequence[]{"Remove Custom Cover Art", "Upload New Cover Art"}, (dialog, which) -> {
                     switch (which) {
                         case 0: // Remove Custom Cover Art
@@ -909,7 +909,7 @@ public class BigPictureActivity extends AppCompatActivity {
         } else if (!containerValue.isEmpty()) {
             textView.setText(containerValue); // Fallback to the container's value
         } else {
-            textView.setText("Not Set"); // Fallback if neither are available
+            textView.setText("未设置"); // Fallback if neither are available
         }
     }
 
@@ -1091,7 +1091,7 @@ public class BigPictureActivity extends AppCompatActivity {
 
                     String[] displayOptions = {"Center", "Stretch", "Tile"};
                     new AlertDialog.Builder(this)
-                            .setTitle("Select Display Mode")
+                            .setTitle("选择显示模式")
                             .setItems(displayOptions, (dialog, which) -> {
                                 editor.putString(WALLPAPER_DISPLAY_PREF_KEY, displayOptions[which].toLowerCase());
                                 editor.apply();

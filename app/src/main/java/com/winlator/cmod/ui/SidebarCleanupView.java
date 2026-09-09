@@ -159,7 +159,7 @@ public class SidebarCleanupView extends View {
             SharedPreferences hudPrefs = getContext().getSharedPreferences(
                     WinlatorHUD.PREFS, Context.MODE_PRIVATE);
             Switch dualCell = new Switch(getContext());
-            dualCell.setText("Dual-cell correction");
+            dualCell.setText("双单元校正");
             dualCell.setTextColor(resolveColor(R.attr.ingameSidebarOnSurface, 0xFFFFFFFF));
             dualCell.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
             dualCell.setGravity(Gravity.CENTER_VERTICAL);
