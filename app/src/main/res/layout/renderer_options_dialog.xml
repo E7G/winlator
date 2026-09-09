@@ -23,7 +23,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Present Mode"
+                    android:text="@string/zh_hc_present_mode_ea2adb72"
                     android:textAppearance="?android:attr/textAppearanceMedium"
                     android:paddingBottom="8dp"/>
                 <Spinner
@@ -44,7 +44,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Renderer Driver"
+                    android:text="@string/zh_hc_renderer_driver_9fc9b4e8"
                     android:textAppearance="?android:attr/textAppearanceMedium"
                     android:paddingBottom="8dp"/>
                 <Spinner
@@ -65,7 +65,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Texture Filter"
+                    android:text="@string/zh_hc_texture_filter_5b421b6e"
                     android:textAppearance="?android:attr/textAppearanceMedium"
                     android:paddingBottom="8dp"/>
                 <Spinner
@@ -82,7 +82,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Swap red/blue channels" />
+                android:text="@string/zh_hc_swap_red_blue_channels_23d680ff" />
 
         </LinearLayout>
     </ScrollView>

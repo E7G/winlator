@@ -25,7 +25,7 @@
         android:id="@+id/reset_properties"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Reset Properties"
+        android:text="@string/zh_hc_reset_properties_bfff3fae"
         android:textSize="16sp"
         android:paddingBottom="8dp" />
 

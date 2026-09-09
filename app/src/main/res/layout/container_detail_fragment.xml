@@ -36,17 +36,17 @@
                 <com.google.android.material.tabs.TabItem
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="General" />
+                    android:text="@string/zh_hc_general_9239ee2c" />
 
                 <com.google.android.material.tabs.TabItem
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Environment" />
+                    android:text="@string/zh_hc_environment_d443a118" />
 
                 <com.google.android.material.tabs.TabItem
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Drivers" />
+                    android:text="@string/zh_hc_drivers_a40ad45b" />
 
                 <com.google.android.material.tabs.TabItem
                     android:layout_width="match_parent"
@@ -56,7 +56,7 @@
                 <com.google.android.material.tabs.TabItem
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Components" />
+                    android:text="@string/zh_hc_components_9289473e" />
 
             </com.google.android.material.tabs.TabLayout>
 
@@ -292,7 +292,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:paddingTop="8dp"
-                android:text="Renderer" />
+                android:text="@string/zh_hc_renderer_e72008fa" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -347,7 +347,7 @@
                         android:id="@+id/TVEmulator64Label"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="64bit Emulator" />
+                        android:text="@string/zh_hc_64bit_emulator_a733ef02" />
 
                     <Spinner
                         style="@style/ComboBox"
@@ -382,7 +382,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="HUD" />
+                android:text="@string/zh_hc_hud_79d4c6ad" />
 
             <Spinner
                 style="@style/ComboBox"
@@ -508,7 +508,7 @@
                     <TextView
                         android:id="@+id/TVDirectInput"
                         style="@style/FieldSetLabel"
-                        android:text="DirectInput" />
+                        android:text="@string/zh_hc_directinput_e1e49126" />
                 </FrameLayout>
             <LinearLayout
                 android:id="@+id/LLContainerDrives"
@@ -838,7 +838,7 @@
                                 android:id="@+id/CBExclusiveXInput"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Exclusive Input" />
+                                android:text="@string/zh_hc_exclusive_input_3deed6a6" />
                             <ImageView
                                 android:id="@+id/BTExclusiveXInputHelp"
                                 style="@style/HelpButton"

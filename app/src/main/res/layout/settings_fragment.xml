@@ -25,7 +25,7 @@
                 android:layout_marginStart="4dp"
                 android:layout_marginTop="6dp"
                 android:layout_marginBottom="8dp"
-                android:text="APP SETTINGS"
+                android:text="@string/zh_hc_app_settings_d2a517dd"
                 android:textColor="@color/ui_text_muted"
                 android:textSize="10sp"
                 android:textStyle="bold"
@@ -63,7 +63,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Runtime and interface"
+                        android:text="@string/zh_hc_runtime_and_interface_564c0689"
                         android:textColor="@color/ui_text_primary"
                         android:textSize="15sp"
                         android:textStyle="bold" />
@@ -72,7 +72,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="3dp"
-                        android:text="Presets, paths, input and diagnostics"
+                        android:text="@string/zh_hc_presets_paths_input_and_diagnostics_a73434de"
                         android:textColor="@color/ui_text_muted"
                         android:textSize="11sp" />
                 </LinearLayout>
@@ -298,12 +298,12 @@
                         android:id="@+id/CBDarkMode"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Enable Dark Mode" />
+                        android:text="@string/zh_hc_enable_dark_mode_0baea2ce" />
                 </LinearLayout>
                 <TextView
                     android:id="@+id/TVTheme"
                     style="@style/FieldSetLabel"
-                    android:text="Theme" />
+                    android:text="@string/zh_hc_theme_a797e309" />
             </FrameLayout>
 
             <!-- Shortcuts -->
@@ -314,7 +314,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Winlator Path" />
+                        android:text="@string/zh_hc_winlator_path_b1ee11f4" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -331,13 +331,13 @@
                             android:id="@+id/BTChooseWinlatorPath"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Choose Path" />
+                            android:text="@string/zh_hc_choose_path_e86f6c32" />
                     </LinearLayout>
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Shortcut Export Path" />
+                        android:text="@string/zh_hc_shortcut_export_path_8915cb1b" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -354,13 +354,13 @@
                             android:id="@+id/BTChooseShortcutExportPath"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Choose Path" />
+                            android:text="@string/zh_hc_choose_path_e86f6c32" />
                     </LinearLayout>
                 </LinearLayout>
                 <TextView
                     android:id="@+id/TVShortcutSettings"
                     style="@style/FieldSetLabel"
-                    android:text="Path Settings" />
+                    android:text="@string/zh_hc_path_settings_d964758b" />
             </FrameLayout>
 
 
@@ -377,7 +377,7 @@
                         android:id="@+id/CBEnableBigPictureMode"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Enable Big Picture Mode on App Launch" />
+                        android:text="@string/zh_hc_enable_big_picture_mode_on_app_launch_cbad5807" />
 
                     <FrameLayout
                         android:layout_width="match_parent"
@@ -395,7 +395,7 @@
                                     android:id="@+id/CBEnableCustomApiKey"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="Set SteamGrid API Key? (Cover Art)" />
+                                    android:text="@string/zh_hc_set_steamgrid_api_key_cover_art_2c219e33" />
 
                                 <ImageView
                                     android:id="@+id/BTHelpApiKey"
@@ -409,14 +409,14 @@
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="8dp"
-                                android:hint="Enter your API Key here"
+                                android:hint="@string/zh_hc_enter_your_api_key_here_6e6995aa"
                                 android:visibility="gone" />
                         </LinearLayout>
 
                         <TextView
                             android:id="@+id/TVCustomApiKey"
                             style="@style/FieldSetLabel"
-                            android:text="SteamGridDB API Key" />
+                            android:text="@string/zh_hc_steamgriddb_api_key_282d9a20" />
                     </FrameLayout>
 
                 </LinearLayout>
@@ -424,7 +424,7 @@
                 <TextView
                     android:id="@+id/TVBigPictureMode"
                     style="@style/FieldSetLabel"
-                    android:text="Big Picture Mode" />
+                    android:text="@string/zh_hc_big_picture_mode_4f5447e9" />
             </FrameLayout>
 
             <FrameLayout
@@ -476,7 +476,7 @@
                         android:id="@+id/CBCursorLock"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Capture External Pointer"
+                        android:text="@string/zh_hc_capture_external_pointer_60e5e580"
                         android:layout_marginTop="8dp" />
 
                     <!-- New Xinput Toggle Checkbox -->
@@ -484,7 +484,7 @@
                         android:id="@+id/CBXinputToggle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Disable Xinput (Used for Exclusive M/KB support)"
+                        android:text="@string/zh_hc_disable_xinput_used_for_exclusive_m_kb_support_c8a77178"
                         android:layout_marginTop="8dp" />
 
                 </LinearLayout>
@@ -601,7 +601,7 @@
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Downloadable Contents URL" />
+                            android:text="@string/zh_hc_downloadable_contents_url_4bb92d9d" />
 
                         <EditText
                             android:layout_width="match_parent"

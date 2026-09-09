@@ -179,7 +179,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Rendering"
+                    android:text="@string/zh_hc_rendering_e066e804"
                     android:textColor="#FFFFFF"
                     android:textSize="24sp"
                     android:textStyle="bold" />
@@ -192,7 +192,7 @@
                     <TextView
                         android:layout_width="92dp"
                         android:layout_height="wrap_content"
-                        android:text="FPS Limiter"
+                        android:text="@string/zh_hc_fps_limiter_94f65d59"
                         android:textColor="#FFFFFF"
                         android:textSize="14sp"
                         android:textStyle="bold" />
@@ -215,7 +215,7 @@
                         android:id="@+id/SWEnableFSR"
                         android:layout_width="match_parent"
                         android:layout_height="48dp"
-                        android:text="Super Resolution"
+                        android:text="@string/zh_hc_super_resolution_95b6f675"
                         android:textColor="#FFFFFF"
                         android:textSize="15sp" />
                     <LinearLayout
@@ -228,7 +228,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Upscaler Mode"
+                            android:text="@string/zh_hc_upscaler_mode_97614a00"
                             android:textColor="#0055ff"
                             android:textSize="13sp" />
                         <Spinner
@@ -242,7 +242,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
-                        android:text="Sharpness"
+                        android:text="@string/zh_hc_sharpness_74ff2464"
                         android:textColor="#0055ff"
                         android:textSize="13sp" />
                     <com.winlator.cmod.widget.SeekBar
@@ -270,7 +270,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Post Effect"
+                            android:text="@string/zh_hc_post_effect_ba8223b9"
                             android:textColor="#0055ff"
                             android:textSize="13sp" />
                         <Spinner
@@ -302,7 +302,7 @@
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="ReShade"
+                            android:text="@string/zh_hc_reshade_c8e7f6d5"
                             android:textColor="?attr/ingameSidebarOnSurface"
                             android:textSize="15sp"
                             android:textStyle="bold" />
@@ -311,7 +311,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="10dp"
-                            android:text="Effect"
+                            android:text="@string/zh_hc_effect_720b5dbc"
                             android:textColor="?attr/ingameSidebarOnSurfaceVariant"
                             android:textSize="12sp" />
 
@@ -334,7 +334,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:text="Strength"
+                                android:text="@string/zh_hc_strength_24d3e4fd"
                                 android:textColor="?attr/ingameSidebarOnSurfaceVariant"
                                 android:textSize="13sp" />
 
@@ -369,7 +369,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Frame Generation"
+                        android:text="@string/zh_hc_frame_generation_c1f88765"
                         android:textColor="#FFFFFF"
                         android:textSize="15sp"
                         android:textStyle="bold" />
@@ -392,7 +392,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Save Preset"
+                        android:text="@string/zh_hc_save_preset_008df194"
                         android:textColor="#DDF6FF"
                         android:textSize="14sp"
                         android:textStyle="bold" />
@@ -413,7 +413,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Display and Effects"
+                    android:text="@string/zh_hc_display_and_effects_1ebb215a"
                     android:textColor="#FFFFFF"
                     android:textSize="24sp"
                     android:textStyle="bold" />
@@ -431,7 +431,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Picture in Picture"
+                        android:text="@string/zh_hc_picture_in_picture_7a61e375"
                         android:textColor="#FFFFFF"
                         android:textSize="15sp" />
                 </LinearLayout>
@@ -449,7 +449,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Toggle Fullscreen"
+                        android:text="@string/zh_hc_toggle_fullscreen_36fd1da9"
                         android:textColor="#FFFFFF"
                         android:textSize="15sp" />
                 </LinearLayout>
@@ -467,7 +467,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Magnifier"
+                        android:text="@string/zh_hc_magnifier_63ca6d87"
                         android:textColor="#FFFFFF"
                         android:textSize="15sp" />
                 </LinearLayout>
@@ -485,7 +485,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Soft Stretch"
+                        android:text="@string/zh_hc_soft_stretch_451eefc3"
                         android:textColor="#FFFFFF"
                         android:textSize="15sp" />
                 </LinearLayout>
@@ -505,7 +505,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Controls"
+                    android:text="@string/zh_hc_controls_bee75ca7"
                     android:textColor="#FFFFFF"
                     android:textSize="24sp"
                     android:textStyle="bold" />
@@ -578,7 +578,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Touch Controls Opacity"
+                        android:text="@string/zh_hc_touch_controls_opacity_d153fba9"
                         android:textColor="#0055ff"
                         android:textSize="13sp"
                         android:textStyle="bold" />
@@ -604,7 +604,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Show Keyboard"
+                        android:text="@string/zh_hc_show_keyboard_67bce6d1"
                         android:textColor="#FFFFFF"
                         android:textSize="15sp" />
                 </LinearLayout>
@@ -622,7 +622,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Vibration"
+                        android:text="@string/zh_hc_vibration_39b345e7"
                         android:textColor="#FFFFFF"
                         android:textSize="15sp" />
                 </LinearLayout>
@@ -634,7 +634,7 @@
                     android:background="@drawable/sidebar_card"
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
-                    android:text="Relative Mouse"
+                    android:text="@string/zh_hc_relative_mouse_6eb02572"
                     android:textColor="#FFFFFF"
                     android:textSize="15sp" />
                 <Switch
@@ -645,7 +645,7 @@
                     android:background="@drawable/sidebar_card"
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
-                    android:text="Disable Mouse"
+                    android:text="@string/zh_hc_disable_mouse_9f629777"
                     android:textColor="#FFFFFF"
                     android:textSize="15sp" />
             </LinearLayout>
@@ -664,7 +664,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="HUD"
+                    android:text="@string/zh_hc_hud_79d4c6ad"
                     android:textColor="#FFFFFF"
                     android:textSize="24sp"
                     android:textStyle="bold" />
@@ -676,7 +676,7 @@
                     android:background="@drawable/sidebar_card"
                     android:paddingStart="14dp"
                     android:paddingEnd="14dp"
-                    android:text="Enable HUD"
+                    android:text="@string/zh_hc_enable_hud_863bf56e"
                     android:textColor="#FFFFFF"
                     android:textSize="15sp" />
                 <LinearLayout
@@ -693,7 +693,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Style"
+                        android:text="@string/zh_hc_style_99a0efc6"
                         android:textColor="#FFFFFF"
                         android:textSize="15sp" />
                     <Spinner
@@ -718,7 +718,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="HUD Metrics"
+                        android:text="@string/zh_hc_hud_metrics_8b153548"
                         android:textColor="#0055ff"
                         android:textSize="13sp"
                         android:textStyle="bold" />
@@ -734,7 +734,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:text="FPS"
+                            android:text="@string/zh_hc_fps_fce204ae"
                             android:textColor="#FFFFFF"
                             android:textSize="12sp" />
 
@@ -743,7 +743,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:text="GPU"
+                            android:text="@string/zh_hc_gpu_a6a63185"
                             android:textColor="#FFFFFF"
                             android:textSize="12sp" />
                     </LinearLayout>
@@ -758,7 +758,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:text="CPU"
+                            android:text="@string/zh_hc_cpu_ff221d47"
                             android:textColor="#FFFFFF"
                             android:textSize="12sp" />
 
@@ -767,7 +767,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:text="RAM"
+                            android:text="@string/zh_hc_ram_ac698b84"
                             android:textColor="#FFFFFF"
                             android:textSize="12sp" />
                     </LinearLayout>
@@ -782,7 +782,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:text="Batt/Temp"
+                            android:text="@string/zh_hc_batt_temp_b9c4a512"
                             android:textColor="#FFFFFF"
                             android:textSize="12sp" />
 
@@ -791,7 +791,7 @@
                             android:layout_width="0dp"
                             android:layout_height="match_parent"
                             android:layout_weight="1"
-                            android:text="Renderer"
+                            android:text="@string/zh_hc_renderer_e72008fa"
                             android:textColor="#FFFFFF"
                             android:textSize="12sp" />
                     </LinearLayout>
@@ -817,7 +817,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="HUD Size"
+                        android:text="@string/zh_hc_hud_size_266f9671"
                         android:textColor="#0055ff"
                         android:textSize="13sp"
                         android:textStyle="bold" />
@@ -832,7 +832,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:text="HUD Opacity"
+                        android:text="@string/zh_hc_hud_opacity_0d7557cd"
                         android:textColor="#0055ff"
                         android:textSize="13sp"
                         android:textStyle="bold" />
@@ -856,7 +856,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Reset HUD"
+                        android:text="@string/zh_hc_reset_hud_3a79d016"
                         android:textColor="#DDF6FF"
                         android:textSize="14sp"
                         android:textStyle="bold" />
@@ -883,7 +883,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Show Logs"
+                        android:text="@string/zh_hc_show_logs_2dbd3a4a"
                         android:textColor="#DDF6FF"
                         android:textSize="14sp"
                         android:textStyle="bold" />
@@ -904,7 +904,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Task Manager"
+                    android:text="@string/zh_hc_task_manager_3bf0f4bc"
                     android:textColor="#FFFFFF"
                     android:textSize="24sp"
                     android:textStyle="bold" />
@@ -924,7 +924,7 @@
                             android:id="@+id/TVCPUTitle"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="CPU"
+                            android:text="@string/zh_hc_cpu_ff221d47"
                             android:textColor="#0055ff"
                             android:textSize="12sp"
                             android:textStyle="bold" />
@@ -950,7 +950,7 @@
                             android:id="@+id/TVMemoryTitle"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Memory"
+                            android:text="@string/zh_hc_memory_89c8a285"
                             android:textColor="#0055ff"
                             android:textSize="12sp"
                             android:textStyle="bold" />
@@ -977,7 +977,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Processes"
+                        android:text="@string/zh_hc_processes_ed7308bb"
                         android:textColor="#FFFFFF"
                         android:textSize="15sp"
                         android:textStyle="bold" />
@@ -1013,7 +1013,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="+ New Task"
+                        android:text="@string/zh_hc_new_task_a9271f95"
                         android:textColor="#DDF6FF"
                         android:textSize="14sp"
                         android:textStyle="bold" />

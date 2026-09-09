@@ -73,7 +73,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Opacity" />
+                android:text="@string/zh_hc_opacity_f0fa69f3" />
 
             <TextView
                 android:id="@+id/TVOpacity"
@@ -92,7 +92,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Theme Color" />
+            android:text="@string/zh_hc_theme_color_29ddb7dc" />
 
         <LinearLayout
             android:id="@+id/LLColorList"
@@ -255,7 +255,7 @@
                     android:id="@+id/BTRemoveIcon"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Remove"
+                    android:text="@string/zh_hc_remove_e963907d"
                     android:textSize="12sp"
                     android:visibility="gone"
                     style="@style/Widget.AppCompat.Button.Borderless" />
@@ -264,7 +264,7 @@
                     android:id="@+id/BTBrowseIcon"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Browse…"
+                    android:text="@string/zh_hc_browse_c1b20f52"
                     android:textSize="12sp"
                     style="@style/Widget.AppCompat.Button.Borderless" />
             </LinearLayout>
@@ -286,7 +286,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Move mouse cursor while dragging" />
+                android:text="@string/zh_hc_move_mouse_cursor_while_dragging_672bfd04" />
         </LinearLayout>
     </LinearLayout>
 </ScrollView>

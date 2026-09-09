@@ -15,7 +15,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Installed Driver"
+            android:text="@string/zh_hc_installed_driver_8de3ed14"
             android:textSize="18sp" />
 
         <androidx.recyclerview.widget.RecyclerView
@@ -35,7 +35,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Latest StevenMXZ Drivers"
+                android:text="@string/zh_hc_latest_stevenmxz_drivers_f795a64d"
                 android:textSize="18sp" />
 
             <TextView
@@ -43,7 +43,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:padding="8dp"
-                android:text="Refresh"
+                android:text="@string/zh_hc_refresh_56e3badc"
                 android:textColor="#0066ff" />
         </LinearLayout>
 
@@ -57,13 +57,13 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Driver Repositories"
+            android:text="@string/zh_hc_driver_repositories_bf2e4375"
             android:textSize="18sp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Manage driver sources and updates."
+            android:text="@string/zh_hc_manage_driver_sources_and_updates_c135b864"
             android:textColor="#9e9e9e"
             android:textSize="14sp" />
 
@@ -79,7 +79,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Install Driver from File" />
+            android:text="@string/zh_hc_install_driver_from_file_eb048d8f" />
 
     </LinearLayout>
 </ScrollView>

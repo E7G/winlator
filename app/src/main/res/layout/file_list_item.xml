@@ -53,7 +53,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
                 android:maxLines="2"
-                android:text="Folder"
+                android:text="@string/zh_hc_folder_30baa249"
                 android:textSize="11sp" />
         </LinearLayout>
 

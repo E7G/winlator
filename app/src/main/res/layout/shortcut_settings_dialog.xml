@@ -154,7 +154,7 @@
                     android:id="@+id/TVWrapperVersionLabel"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Current Version:"
+                    android:text="@string/zh_hc_current_version_f8f8ed04"
                     android:textColor="@color/ui_text_muted"
                     android:textSize="12sp"
                     android:textStyle="bold" />
@@ -228,7 +228,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:text="Renderer"
+                android:text="@string/zh_hc_renderer_e72008fa"
                 android:textColor="@color/ui_text_muted"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -301,7 +301,7 @@
                         android:id="@+id/TVEmulator64Label"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="64bit Emulator"
+                        android:text="@string/zh_hc_64bit_emulator_a733ef02"
                         android:textColor="@color/ui_text_muted"
                         android:textSize="12sp"
                         android:textStyle="bold" />
@@ -643,13 +643,13 @@
                         android:id="@+id/CBEnableRelativeMouse"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Enable Relative Mouse" />
+                        android:text="@string/zh_hc_enable_relative_mouse_b06daeac" />
 
                     <CheckBox
                         android:id="@+id/CBDisableMouse"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Disable Mouse" />
+                        android:text="@string/zh_hc_disable_mouse_9f629777" />
 
                     <CheckBox
                         android:id="@+id/CBTouchscreenMode"
@@ -720,7 +720,7 @@
                             android:id="@+id/CBExclusiveXInput"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Exclusive Input" />
+                            android:text="@string/zh_hc_exclusive_input_3deed6a6" />
                         <ImageView
                             android:id="@+id/BTExclusiveXInputHelp"
                             style="@style/HelpButton"

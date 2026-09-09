@@ -26,12 +26,12 @@
         android:id="@+id/commandInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Enter command"
+        android:hint="@string/zh_hc_enter_command_2241a67e"
         android:inputType="text" />
 
     <Button
         android:id="@+id/executeButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Execute" />
+        android:text="@string/zh_hc_execute_6ea36ce8" />
 </LinearLayout>
