@@ -4,7 +4,7 @@ import hashlib
 import html
 import re
 
-# Exact, user-facing literals still hard-coded by upstream Ludashi 4.0 XML.
+# Exact user-facing literals still hard-coded by upstream Ludashi 4.0 XML.
 ZH = {
     'FPS:': 'FPS：', 'Renderer:': '渲染器：', 'GPU:': 'GPU：', 'RAM:': '内存：',
     'Left Analog Stick Settings': '左摇杆设置', 'Deadzone: 10%': '死区：10%',
@@ -57,50 +57,70 @@ ZH = {
     'Export': '导出', 'Clone': '克隆',
 }
 
-# New Ludashi 4.0 resource keys missing from the previous Chinese pack.
+# Java strings caught by direct user-facing UI setters. These are translated in-place to avoid changing
+# overload behavior of setText/setTitle/setMessage in the many different UI classes used by this fork.
+JAVA_ZH = {
+    'All Files Access Required': '需要所有文件访问权限',
+    'In order to grant access to additional storage devices such as USB storage device, the All Files Access permission must be granted. Press Okay to grant All Files Access in your Android Settings.': '为了访问 USB 存储等额外存储设备，需要授予“所有文件访问”权限。点击“确定”前往 Android 设置授权。',
+    'Scheme Color': '方案颜色',
+    "Applies to every control that doesn't have its own custom color": '应用于所有未设置自定义颜色的控制项',
+    'Select a container': '选择容器', 'Current Driver': '当前驱动', 'Proton is in use': 'Proton 正在使用',
+    'The bundled Proton files will be removed. You can install them again later.': '内置 Proton 文件将被删除，之后可以重新安装。',
+    'Delete driver?': '删除驱动？', 'The installed driver files will be removed.': '已安装的驱动文件将被删除。',
+    'Runtime is in use': '运行环境正在使用', 'Delete component?': '删除组件？',
+    'The installed files will be removed from WinZ.': '已安装文件将从 WinZ 中删除。',
+    'File Manager': '文件管理器', 'No Containers': '没有容器',
+    'You need to create a container first to access Drive C:.': '需要先创建容器才能访问 C: 盘。',
+    'Select Container Drive C:': '选择容器 C: 盘', 'Drive C: Not Initialized': 'C: 盘尚未初始化',
+    'Drive C:': 'C: 盘', 'External Storage': '外部存储', 'Drive Z:': 'Z: 盘', 'Select Container': '选择容器',
+    'File Conflict': '文件冲突', 'Calculating...': '正在计算…', 'Rename': '重命名', 'Delete': '删除',
+    'Disable BG Music': '关闭背景音乐', 'Enable BG Music': '启用背景音乐', 'Cover Art Options': '封面选项',
+    'Not Set': '未设置', 'Select Display Mode': '选择显示模式', 'FPS Limit': 'FPS 限制',
+    'Enter custom FPS': '输入自定义 FPS', 'Off': '关闭', 'Custom': '自定义', 'Dual-cell correction': '双单元校正',
+    'ReShade effect': 'ReShade 效果', 'Wallpaper': '壁纸', 'Wallpaper image': '壁纸图片',
+    'Available Drivers': '可用驱动', 'Select Variant': '选择版本', 'Driver Sources': '驱动源',
+    'Name (e.g. Turnip Drivers)': '名称（例如 Turnip 驱动）', 'GitHub API URL': 'GitHub API 地址',
+}
+
 MISSING_ZH = {
-    'icon_set_successfully': '图标设置成功',
-    'unable_to_set_icon': '无法设置图标',
-    'library': '游戏库',
-    'configure_container': '配置容器',
-    'launch_environment': '启动环境',
-    'video': '视频',
-    'storage': '存储',
-    'quick_settings': '快捷设置',
-    'advanced_settings': '高级设置',
-    'global_compatibility_profile': '全局兼容性配置',
-    'profile_compatibility': '兼容性',
-    'profile_balanced': '均衡',
-    'profile_performance': '性能',
-    'profile_custom': '自定义',
-    'play': '运行',
-    'arguments': '启动参数',
-    'game_folder': '游戏文件夹',
+    'icon_set_successfully': '图标设置成功', 'unable_to_set_icon': '无法设置图标', 'library': '游戏库',
+    'configure_container': '配置容器', 'launch_environment': '启动环境', 'video': '视频', 'storage': '存储',
+    'quick_settings': '快捷设置', 'advanced_settings': '高级设置', 'global_compatibility_profile': '全局兼容性配置',
+    'profile_compatibility': '兼容性', 'profile_balanced': '均衡', 'profile_performance': '性能',
+    'profile_custom': '自定义', 'play': '运行', 'arguments': '启动参数', 'game_folder': '游戏文件夹',
     'magnifier_not_available': 'DisplayX 模式下无法使用放大镜',
 }
 
-# Literals that are identifiers, paths, placeholders or product/technical names and should stay as-is.
 SKIP = {
-    'Winlator', 'Winlator CMOD', 'YouTube', 'Drive D:', '/storage/emulated/0/Download',
-    'FolderName', 'default_version',
+    'Winlator', 'Winlator CMOD', 'YouTube', 'Drive D:', '/storage/emulated/0/Download', 'FolderName', 'default_version',
     '-force-gfx-direct', '-force-d3d11-singlethreaded', '-force-dx9', '-force-d3d9', '-force-d3d11',
     '--force-gfx-direct', '--force-d3d11-singlethreaded', '--force-dx9', '--force-d3d9', '--force-d3d11',
 }
 
 ATTR_RE = re.compile(r'(android:(?:text|hint|title|summary|contentDescription)=")([^"]+)(")')
+STR_RE = re.compile(r'<string\s+name="([^"]+)"[^>]*>(.*?)</string>', re.S)
+JAVA_UI_RE = re.compile(r'(\.(?:setText|setHint|setTitle|setMessage|setContentDescription)\(\s*")([^"\\]*(?:\\.[^"\\]*)*)("\s*\))')
 
 def key_for(text):
     slug = re.sub(r'[^a-z0-9]+', '_', text.lower()).strip('_')
     slug = slug[:48] if slug else 'text'
-    digest = hashlib.sha1(text.encode('utf-8')).hexdigest()[:8]
-    return f'zh_hc_{slug}_{digest}'
+    return f'zh_hc_{slug}_{hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]}'
 
-used = {}
-roots = [Path('app/src/main/res/layout'), Path('app/src/main/res/layout-land'), Path('app/src/main/res/menu'), Path('app/src/main/res/xml')]
+def read_strings(path):
+    if not path.exists():
+        return {}
+    text = path.read_text(encoding='utf-8', errors='ignore')
+    return {m.group(1): m.group(2).strip() for m in STR_RE.finditer(text)}
+
+base_out = Path('app/src/main/res/values/strings_zhlocalize.xml')
+zh_out = Path('app/src/main/res/values-zh-rCN/strings_ludashi4.xml')
+existing_base = {k: v for k, v in read_strings(base_out).items() if k.startswith('zh_hc_')}
+existing_zh = {k: v for k, v in read_strings(zh_out).items() if k.startswith('zh_hc_')}
+used = {k: (html.unescape(v), html.unescape(existing_zh.get(k, v))) for k, v in existing_base.items()}
+
 changed_files = 0
 replacements = 0
-
-for root in roots:
+for root in [Path('app/src/main/res/layout'), Path('app/src/main/res/layout-land'), Path('app/src/main/res/menu'), Path('app/src/main/res/xml')]:
     if not root.exists():
         continue
     for p in root.rglob('*.xml'):
@@ -108,10 +128,11 @@ for root in roots:
         def repl(m):
             global replacements
             value = m.group(2)
-            if value.startswith(('@', '?')) or value in SKIP or value not in ZH:
+            lookup = value.strip()
+            if value.startswith(('@', '?')) or lookup in SKIP or lookup not in ZH:
                 return m.group(0)
-            key = key_for(value)
-            used[key] = (value, ZH[value])
+            key = key_for(lookup)
+            used[key] = (lookup, ZH[lookup])
             replacements += 1
             return m.group(1) + '@string/' + key + m.group(3)
         updated = ATTR_RE.sub(repl, original)
@@ -119,11 +140,24 @@ for root in roots:
             p.write_text(updated, encoding='utf-8')
             changed_files += 1
 
-base_out = Path('app/src/main/res/values/strings_zhlocalize.xml')
-zh_out = Path('app/src/main/res/values-zh-rCN/strings_ludashi4.xml')
+java_changed = 0
+java_replacements = 0
+for p in Path('app/src/main/java').rglob('*.java'):
+    original = p.read_text(encoding='utf-8', errors='ignore')
+    def java_repl(m):
+        global java_replacements
+        value = m.group(2)
+        if value not in JAVA_ZH:
+            return m.group(0)
+        java_replacements += 1
+        return m.group(1) + JAVA_ZH[value].replace('"', '\\"') + m.group(3)
+    updated = JAVA_UI_RE.sub(java_repl, original)
+    if updated != original:
+        p.write_text(updated, encoding='utf-8')
+        java_changed += 1
+
 base_out.parent.mkdir(parents=True, exist_ok=True)
 zh_out.parent.mkdir(parents=True, exist_ok=True)
-
 base_lines = ['<?xml version="1.0" encoding="utf-8"?>', '<resources>']
 for key, (en, cn) in sorted(used.items()):
     base_lines.append(f'    <string name="{key}" formatted="false">{html.escape(en, quote=False)}</string>')
@@ -138,4 +172,5 @@ for key, (en, cn) in sorted(used.items()):
 zh_lines.append('</resources>')
 zh_out.write_text('\n'.join(zh_lines) + '\n', encoding='utf-8')
 
-print(f'Localized {replacements} XML attributes across {changed_files} files; generated {len(used)} shared resource keys.')
+print(f'Localized {replacements} XML attributes across {changed_files} files; retained/generated {len(used)} XML resource keys.')
+print(f'Localized {java_replacements} Java UI literals across {java_changed} files.')
