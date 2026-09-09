@@ -18,6 +18,144 @@
     <string name="arguments">启动参数</string>
     <string name="game_folder">游戏文件夹</string>
     <string name="magnifier_not_available">DisplayX 模式下无法使用放大镜</string>
-    <string name="zh_hc_number_of_times_played_5d882350" formatted="false">游玩次数：</string>
-    <string name="zh_hc_playtime_87c7e7f9" formatted="false">游玩时长：</string>
+    <string name="zh_hc_64bit_emulator_a733ef02" formatted="false">64 位模拟器</string>
+    <string name="zh_hc_animation_speed_365e300e" formatted="false">动画速度：</string>
+    <string name="zh_hc_app_settings_d2a517dd" formatted="false">应用设置</string>
+    <string name="zh_hc_audio_driver_a92756e4" formatted="false">音频驱动：</string>
+    <string name="zh_hc_back_b52b36b7" formatted="false">返回</string>
+    <string name="zh_hc_background_settings_123b12c5" formatted="false">背景设置：</string>
+    <string name="zh_hc_batt_temp_b9c4a512" formatted="false">电量/温度</string>
+    <string name="zh_hc_big_picture_mode_4f5447e9" formatted="false">大屏模式</string>
+    <string name="zh_hc_box64_preset_a9cdce45" formatted="false">Box64 预设：</string>
+    <string name="zh_hc_browse_c1b20f52" formatted="false">浏览…</string>
+    <string name="zh_hc_capture_external_pointer_60e5e580" formatted="false">捕获外接鼠标指针</string>
+    <string name="zh_hc_change_icon_f2bba12e" formatted="false">更改图标</string>
+    <string name="zh_hc_choose_path_e86f6c32" formatted="false">选择路径</string>
+    <string name="zh_hc_click_to_upload_custom_cover_art_8be651a4" formatted="false">点击上传自定义封面</string>
+    <string name="zh_hc_clone_d8cdb573" formatted="false">克隆</string>
+    <string name="zh_hc_components_9289473e" formatted="false">组件</string>
+    <string name="zh_hc_controls_bee75ca7" formatted="false">控制</string>
+    <string name="zh_hc_cpu_ff221d47" formatted="false">CPU</string>
+    <string name="zh_hc_current_version_f8f8ed04" formatted="false">当前版本：</string>
+    <string name="zh_hc_custom_wallpaper_b42860c8" formatted="false">自定义壁纸</string>
+    <string name="zh_hc_deadzone_10_e6ddb648" formatted="false">死区：10%</string>
+    <string name="zh_hc_default_808d7dca" formatted="false">默认</string>
+    <string name="zh_hc_directinput_e1e49126" formatted="false">DirectInput</string>
+    <string name="zh_hc_disable_bg_music_51d13649" formatted="false">关闭背景音乐</string>
+    <string name="zh_hc_disable_mouse_9f629777" formatted="false">禁用鼠标</string>
+    <string name="zh_hc_disable_xinput_used_for_exclusive_m_kb_support_c8a77178" formatted="false">禁用 XInput（用于独占鼠标/键盘支持）</string>
+    <string name="zh_hc_display_and_effects_1ebb215a" formatted="false">显示与效果</string>
+    <string name="zh_hc_downloadable_contents_url_4bb92d9d" formatted="false">可下载内容地址</string>
+    <string name="zh_hc_driver_repositories_bf2e4375" formatted="false">驱动仓库</string>
+    <string name="zh_hc_driver_version_1ee41dfa" formatted="false">驱动版本：</string>
+    <string name="zh_hc_drivers_a40ad45b" formatted="false">驱动</string>
+    <string name="zh_hc_dx_wrapper_8112373c" formatted="false">DX 转译层：</string>
+    <string name="zh_hc_dxvk_vkd3d_config_86f2ceb5" formatted="false">DXVK/VKD3D 配置：</string>
+    <string name="zh_hc_effect_720b5dbc" formatted="false">效果</string>
+    <string name="zh_hc_enable_big_picture_mode_on_app_launch_cbad5807" formatted="false">启动应用时进入大屏模式</string>
+    <string name="zh_hc_enable_dark_mode_0baea2ce" formatted="false">启用深色模式</string>
+    <string name="zh_hc_enable_hud_863bf56e" formatted="false">启用 HUD</string>
+    <string name="zh_hc_enable_relative_mouse_b06daeac" formatted="false">启用相对鼠标</string>
+    <string name="zh_hc_enter_command_2241a67e" formatted="false">输入命令</string>
+    <string name="zh_hc_enter_your_api_key_here_6e6995aa" formatted="false">在此输入 API 密钥</string>
+    <string name="zh_hc_enter_youtube_url_e0f71696" formatted="false">输入 YouTube 地址</string>
+    <string name="zh_hc_environment_d443a118" formatted="false">环境</string>
+    <string name="zh_hc_exclusive_input_3deed6a6" formatted="false">独占输入</string>
+    <string name="zh_hc_execute_6ea36ce8" formatted="false">执行</string>
+    <string name="zh_hc_export_f3e4fadb" formatted="false">导出</string>
+    <string name="zh_hc_fast_8db6a2f1" formatted="false">快</string>
+    <string name="zh_hc_file_manager_0f58d79a" formatted="false">文件管理器</string>
+    <string name="zh_hc_folder_30baa249" formatted="false">文件夹</string>
+    <string name="zh_hc_fps_3a2a5b74" formatted="false">FPS：</string>
+    <string name="zh_hc_fps_fce204ae" formatted="false">FPS</string>
+    <string name="zh_hc_fps_limiter_94f65d59" formatted="false">FPS 限制</string>
+    <string name="zh_hc_frame_generation_c1f88765" formatted="false">帧生成</string>
+    <string name="zh_hc_gear_def2b5f8" formatted="false">齿轮</string>
+    <string name="zh_hc_general_9239ee2c" formatted="false">常规</string>
+    <string name="zh_hc_gpu_021a8fa5" formatted="false">GPU：</string>
+    <string name="zh_hc_gpu_a6a63185" formatted="false">GPU</string>
+    <string name="zh_hc_graphics_driver_ca4537f6" formatted="false">图形驱动：</string>
+    <string name="zh_hc_hud_79d4c6ad" formatted="false">HUD</string>
+    <string name="zh_hc_hud_metrics_8b153548" formatted="false">HUD 指标</string>
+    <string name="zh_hc_hud_opacity_0d7557cd" formatted="false">HUD 透明度</string>
+    <string name="zh_hc_hud_size_266f9671" formatted="false">HUD 大小</string>
+    <string name="zh_hc_install_driver_from_file_eb048d8f" formatted="false">从文件安装驱动</string>
+    <string name="zh_hc_installed_driver_8de3ed14" formatted="false">已安装驱动</string>
+    <string name="zh_hc_invert_x_axis_left_stick_ead3d14b" formatted="false">反转左摇杆 X 轴</string>
+    <string name="zh_hc_invert_x_axis_right_stick_f1cfedd0" formatted="false">反转右摇杆 X 轴</string>
+    <string name="zh_hc_invert_y_axis_left_stick_de846fc3" formatted="false">反转左摇杆 Y 轴</string>
+    <string name="zh_hc_invert_y_axis_right_stick_a870974c" formatted="false">反转右摇杆 Y 轴</string>
+    <string name="zh_hc_latest_stevenmxz_drivers_f795a64d" formatted="false">最新 StevenMXZ 驱动</string>
+    <string name="zh_hc_left_analog_stick_settings_a5419ffa" formatted="false">左摇杆设置</string>
+    <string name="zh_hc_magnifier_63ca6d87" formatted="false">放大镜</string>
+    <string name="zh_hc_manage_driver_sources_and_updates_c135b864" formatted="false">管理驱动来源与更新。</string>
+    <string name="zh_hc_max_frame_latency_9e2f20db" formatted="false">最大帧延迟</string>
+    <string name="zh_hc_memory_89c8a285" formatted="false">内存</string>
+    <string name="zh_hc_more_options_86c0a35e" formatted="false">更多选项</string>
+    <string name="zh_hc_move_mouse_cursor_while_dragging_672bfd04" formatted="false">拖动时移动鼠标光标</string>
+    <string name="zh_hc_new_task_a9271f95" formatted="false">+ 新建任务</string>
+    <string name="zh_hc_no_background_e47fc484" formatted="false">无背景</string>
+    <string name="zh_hc_nothing_here_launch_your_container_and_create_a__e4185895" formatted="false">这里还没有内容。请启动容器并创建快捷方式。</string>
+    <string name="zh_hc_off_e3de5ab0" formatted="false">关闭</string>
+    <string name="zh_hc_opacity_f0fa69f3" formatted="false">透明度</string>
+    <string name="zh_hc_parallax_mode_1ca43d3b" formatted="false">视差模式：</string>
+    <string name="zh_hc_paste_db248300" formatted="false">粘贴</string>
+    <string name="zh_hc_path_settings_d964758b" formatted="false">路径设置</string>
+    <string name="zh_hc_pause_resume_5a204204" formatted="false">暂停/继续</string>
+    <string name="zh_hc_picture_in_picture_7a61e375" formatted="false">画中画</string>
+    <string name="zh_hc_post_effect_ba8223b9" formatted="false">后处理效果</string>
+    <string name="zh_hc_present_mode_ea2adb72" formatted="false">呈现模式</string>
+    <string name="zh_hc_presets_paths_input_and_diagnostics_a73434de" formatted="false">预设、路径、输入与诊断</string>
+    <string name="zh_hc_processes_ed7308bb" formatted="false">进程</string>
+    <string name="zh_hc_quilt_01aa4888" formatted="false">拼布</string>
+    <string name="zh_hc_ram_ac698b84" formatted="false">内存</string>
+    <string name="zh_hc_ram_d8fd50dd" formatted="false">内存：</string>
+    <string name="zh_hc_refresh_56e3badc" formatted="false">刷新</string>
+    <string name="zh_hc_relative_mouse_6eb02572" formatted="false">相对鼠标</string>
+    <string name="zh_hc_remove_e963907d" formatted="false">删除</string>
+    <string name="zh_hc_renderer_6d79b469" formatted="false">渲染器：</string>
+    <string name="zh_hc_renderer_driver_9fc9b4e8" formatted="false">渲染驱动</string>
+    <string name="zh_hc_renderer_e72008fa" formatted="false">渲染器</string>
+    <string name="zh_hc_rendering_e066e804" formatted="false">渲染</string>
+    <string name="zh_hc_reset_hud_3a79d016" formatted="false">重置 HUD</string>
+    <string name="zh_hc_reset_mp3_3307b109" formatted="false">重置 MP3</string>
+    <string name="zh_hc_reset_properties_bfff3fae" formatted="false">重置属性</string>
+    <string name="zh_hc_reshade_c8e7f6d5" formatted="false">ReShade</string>
+    <string name="zh_hc_right_analog_stick_settings_739f7808" formatted="false">右摇杆设置</string>
+    <string name="zh_hc_runtime_and_interface_564c0689" formatted="false">运行环境与界面</string>
+    <string name="zh_hc_save_preset_008df194" formatted="false">保存预设</string>
+    <string name="zh_hc_select_animation_png_folder_358899e1" formatted="false">选择动画（*.png）文件夹</string>
+    <string name="zh_hc_select_mp3_689cd6a7" formatted="false">选择 MP3</string>
+    <string name="zh_hc_select_music_source_05196cd8" formatted="false">选择音乐来源：</string>
+    <string name="zh_hc_select_wallpaper_7eeb5179" formatted="false">选择壁纸</string>
+    <string name="zh_hc_sensitivity_100_e474db75" formatted="false">灵敏度：100%</string>
+    <string name="zh_hc_set_bg_music_71017f48" formatted="false">设置背景音乐</string>
+    <string name="zh_hc_set_steamgrid_api_key_cover_art_2c219e33" formatted="false">设置 SteamGrid API 密钥？（封面图）</string>
+    <string name="zh_hc_settings_c7f73bb5" formatted="false">设置</string>
+    <string name="zh_hc_sharpness_74ff2464" formatted="false">锐度</string>
+    <string name="zh_hc_shortcut_export_path_8915cb1b" formatted="false">快捷方式导出路径</string>
+    <string name="zh_hc_show_keyboard_67bce6d1" formatted="false">显示键盘</string>
+    <string name="zh_hc_show_logs_2dbd3a4a" formatted="false">显示日志</string>
+    <string name="zh_hc_slow_33dcec9c" formatted="false">慢</string>
+    <string name="zh_hc_soft_stretch_451eefc3" formatted="false">柔性拉伸</string>
+    <string name="zh_hc_steamgriddb_api_key_282d9a20" formatted="false">SteamGridDB API 密钥</string>
+    <string name="zh_hc_storage_9e092dda" formatted="false">存储</string>
+    <string name="zh_hc_strength_24d3e4fd" formatted="false">强度</string>
+    <string name="zh_hc_style_99a0efc6" formatted="false">样式</string>
+    <string name="zh_hc_super_resolution_95b6f675" formatted="false">超分辨率</string>
+    <string name="zh_hc_swap_red_blue_channels_23d680ff" formatted="false">交换红/蓝通道</string>
+    <string name="zh_hc_task_manager_3bf0f4bc" formatted="false">任务管理器</string>
+    <string name="zh_hc_texture_filter_5b421b6e" formatted="false">纹理过滤</string>
+    <string name="zh_hc_theme_a797e309" formatted="false">主题</string>
+    <string name="zh_hc_theme_color_29ddb7dc" formatted="false">主题颜色</string>
+    <string name="zh_hc_toggle_fullscreen_36fd1da9" formatted="false">切换全屏</string>
+    <string name="zh_hc_toggle_relative_mouse_movement_5ddb7d55" formatted="false">切换相对鼠标移动</string>
+    <string name="zh_hc_touch_controls_opacity_d153fba9" formatted="false">触控按键透明度</string>
+    <string name="zh_hc_up_directory_4deae380" formatted="false">返回上级目录</string>
+    <string name="zh_hc_upscaler_mode_97614a00" formatted="false">升频模式</string>
+    <string name="zh_hc_use_square_deadzone_left_stick_8ba1d9bf" formatted="false">左摇杆使用方形死区</string>
+    <string name="zh_hc_vibration_39b345e7" formatted="false">振动</string>
+    <string name="zh_hc_wave_a24d6011" formatted="false">波浪</string>
+    <string name="zh_hc_winlator_path_b1ee11f4" formatted="false">Winlator 路径</string>
+    <string name="zh_hc_youtube_video_url_not_all_youtube_videos_are_sup_1e80db58" formatted="false">YouTube 视频地址（并非所有视频都受支持）：</string>
 </resources>

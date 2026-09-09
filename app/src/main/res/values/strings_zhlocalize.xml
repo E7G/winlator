@@ -1,5 +1,143 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="zh_hc_number_of_times_played_5d882350" formatted="false">Number of times played:</string>
-    <string name="zh_hc_playtime_87c7e7f9" formatted="false">Playtime:</string>
+    <string name="zh_hc_64bit_emulator_a733ef02" formatted="false">64bit Emulator</string>
+    <string name="zh_hc_animation_speed_365e300e" formatted="false">Animation Speed:</string>
+    <string name="zh_hc_app_settings_d2a517dd" formatted="false">APP SETTINGS</string>
+    <string name="zh_hc_audio_driver_a92756e4" formatted="false">Audio Driver:</string>
+    <string name="zh_hc_back_b52b36b7" formatted="false">Back</string>
+    <string name="zh_hc_background_settings_123b12c5" formatted="false">Background settings:</string>
+    <string name="zh_hc_batt_temp_b9c4a512" formatted="false">Batt/Temp</string>
+    <string name="zh_hc_big_picture_mode_4f5447e9" formatted="false">Big Picture Mode</string>
+    <string name="zh_hc_box64_preset_a9cdce45" formatted="false">Box64 Preset:</string>
+    <string name="zh_hc_browse_c1b20f52" formatted="false">Browse…</string>
+    <string name="zh_hc_capture_external_pointer_60e5e580" formatted="false">Capture External Pointer</string>
+    <string name="zh_hc_change_icon_f2bba12e" formatted="false">Change Icon</string>
+    <string name="zh_hc_choose_path_e86f6c32" formatted="false">Choose Path</string>
+    <string name="zh_hc_click_to_upload_custom_cover_art_8be651a4" formatted="false">Click to upload custom cover art</string>
+    <string name="zh_hc_clone_d8cdb573" formatted="false">Clone</string>
+    <string name="zh_hc_components_9289473e" formatted="false">Components</string>
+    <string name="zh_hc_controls_bee75ca7" formatted="false">Controls</string>
+    <string name="zh_hc_cpu_ff221d47" formatted="false">CPU</string>
+    <string name="zh_hc_current_version_f8f8ed04" formatted="false">Current Version:</string>
+    <string name="zh_hc_custom_wallpaper_b42860c8" formatted="false">Custom Wallpaper</string>
+    <string name="zh_hc_deadzone_10_e6ddb648" formatted="false">Deadzone: 10%</string>
+    <string name="zh_hc_default_808d7dca" formatted="false">Default</string>
+    <string name="zh_hc_directinput_e1e49126" formatted="false">DirectInput</string>
+    <string name="zh_hc_disable_bg_music_51d13649" formatted="false">Disable BG Music</string>
+    <string name="zh_hc_disable_mouse_9f629777" formatted="false">Disable Mouse</string>
+    <string name="zh_hc_disable_xinput_used_for_exclusive_m_kb_support_c8a77178" formatted="false">Disable Xinput (Used for Exclusive M/KB support)</string>
+    <string name="zh_hc_display_and_effects_1ebb215a" formatted="false">Display and Effects</string>
+    <string name="zh_hc_downloadable_contents_url_4bb92d9d" formatted="false">Downloadable Contents URL</string>
+    <string name="zh_hc_driver_repositories_bf2e4375" formatted="false">Driver Repositories</string>
+    <string name="zh_hc_driver_version_1ee41dfa" formatted="false">Driver Version:</string>
+    <string name="zh_hc_drivers_a40ad45b" formatted="false">Drivers</string>
+    <string name="zh_hc_dx_wrapper_8112373c" formatted="false">DX Wrapper:</string>
+    <string name="zh_hc_dxvk_vkd3d_config_86f2ceb5" formatted="false">DXVK/VKD3D Config:</string>
+    <string name="zh_hc_effect_720b5dbc" formatted="false">Effect</string>
+    <string name="zh_hc_enable_big_picture_mode_on_app_launch_cbad5807" formatted="false">Enable Big Picture Mode on App Launch</string>
+    <string name="zh_hc_enable_dark_mode_0baea2ce" formatted="false">Enable Dark Mode</string>
+    <string name="zh_hc_enable_hud_863bf56e" formatted="false">Enable HUD</string>
+    <string name="zh_hc_enable_relative_mouse_b06daeac" formatted="false">Enable Relative Mouse</string>
+    <string name="zh_hc_enter_command_2241a67e" formatted="false">Enter command</string>
+    <string name="zh_hc_enter_your_api_key_here_6e6995aa" formatted="false">Enter your API Key here</string>
+    <string name="zh_hc_enter_youtube_url_e0f71696" formatted="false">Enter YouTube URL</string>
+    <string name="zh_hc_environment_d443a118" formatted="false">Environment</string>
+    <string name="zh_hc_exclusive_input_3deed6a6" formatted="false">Exclusive Input</string>
+    <string name="zh_hc_execute_6ea36ce8" formatted="false">Execute</string>
+    <string name="zh_hc_export_f3e4fadb" formatted="false">Export</string>
+    <string name="zh_hc_fast_8db6a2f1" formatted="false">Fast</string>
+    <string name="zh_hc_file_manager_0f58d79a" formatted="false">File Manager</string>
+    <string name="zh_hc_folder_30baa249" formatted="false">Folder</string>
+    <string name="zh_hc_fps_3a2a5b74" formatted="false">FPS:</string>
+    <string name="zh_hc_fps_fce204ae" formatted="false">FPS</string>
+    <string name="zh_hc_fps_limiter_94f65d59" formatted="false">FPS Limiter</string>
+    <string name="zh_hc_frame_generation_c1f88765" formatted="false">Frame Generation</string>
+    <string name="zh_hc_gear_def2b5f8" formatted="false">Gear</string>
+    <string name="zh_hc_general_9239ee2c" formatted="false">General</string>
+    <string name="zh_hc_gpu_021a8fa5" formatted="false">GPU:</string>
+    <string name="zh_hc_gpu_a6a63185" formatted="false">GPU</string>
+    <string name="zh_hc_graphics_driver_ca4537f6" formatted="false">Graphics Driver:</string>
+    <string name="zh_hc_hud_79d4c6ad" formatted="false">HUD</string>
+    <string name="zh_hc_hud_metrics_8b153548" formatted="false">HUD Metrics</string>
+    <string name="zh_hc_hud_opacity_0d7557cd" formatted="false">HUD Opacity</string>
+    <string name="zh_hc_hud_size_266f9671" formatted="false">HUD Size</string>
+    <string name="zh_hc_install_driver_from_file_eb048d8f" formatted="false">Install Driver from File</string>
+    <string name="zh_hc_installed_driver_8de3ed14" formatted="false">Installed Driver</string>
+    <string name="zh_hc_invert_x_axis_left_stick_ead3d14b" formatted="false">Invert X Axis (Left Stick)</string>
+    <string name="zh_hc_invert_x_axis_right_stick_f1cfedd0" formatted="false">Invert X Axis (Right Stick)</string>
+    <string name="zh_hc_invert_y_axis_left_stick_de846fc3" formatted="false">Invert Y Axis (Left Stick)</string>
+    <string name="zh_hc_invert_y_axis_right_stick_a870974c" formatted="false">Invert Y Axis (Right Stick)</string>
+    <string name="zh_hc_latest_stevenmxz_drivers_f795a64d" formatted="false">Latest StevenMXZ Drivers</string>
+    <string name="zh_hc_left_analog_stick_settings_a5419ffa" formatted="false">Left Analog Stick Settings</string>
+    <string name="zh_hc_magnifier_63ca6d87" formatted="false">Magnifier</string>
+    <string name="zh_hc_manage_driver_sources_and_updates_c135b864" formatted="false">Manage driver sources and updates.</string>
+    <string name="zh_hc_max_frame_latency_9e2f20db" formatted="false">Max Frame Latency</string>
+    <string name="zh_hc_memory_89c8a285" formatted="false">Memory</string>
+    <string name="zh_hc_more_options_86c0a35e" formatted="false">More options</string>
+    <string name="zh_hc_move_mouse_cursor_while_dragging_672bfd04" formatted="false">Move mouse cursor while dragging</string>
+    <string name="zh_hc_new_task_a9271f95" formatted="false">+ New Task</string>
+    <string name="zh_hc_no_background_e47fc484" formatted="false">No Background</string>
+    <string name="zh_hc_nothing_here_launch_your_container_and_create_a__e4185895" formatted="false">Nothing here. Launch your container and create a Shortcut to get started!</string>
+    <string name="zh_hc_off_e3de5ab0" formatted="false">Off</string>
+    <string name="zh_hc_opacity_f0fa69f3" formatted="false">Opacity</string>
+    <string name="zh_hc_parallax_mode_1ca43d3b" formatted="false">Parallax Mode:</string>
+    <string name="zh_hc_paste_db248300" formatted="false">Paste</string>
+    <string name="zh_hc_path_settings_d964758b" formatted="false">Path Settings</string>
+    <string name="zh_hc_pause_resume_5a204204" formatted="false">Pause/Resume</string>
+    <string name="zh_hc_picture_in_picture_7a61e375" formatted="false">Picture in Picture</string>
+    <string name="zh_hc_post_effect_ba8223b9" formatted="false">Post Effect</string>
+    <string name="zh_hc_present_mode_ea2adb72" formatted="false">Present Mode</string>
+    <string name="zh_hc_presets_paths_input_and_diagnostics_a73434de" formatted="false">Presets, paths, input and diagnostics</string>
+    <string name="zh_hc_processes_ed7308bb" formatted="false">Processes</string>
+    <string name="zh_hc_quilt_01aa4888" formatted="false">Quilt</string>
+    <string name="zh_hc_ram_ac698b84" formatted="false">RAM</string>
+    <string name="zh_hc_ram_d8fd50dd" formatted="false">RAM:</string>
+    <string name="zh_hc_refresh_56e3badc" formatted="false">Refresh</string>
+    <string name="zh_hc_relative_mouse_6eb02572" formatted="false">Relative Mouse</string>
+    <string name="zh_hc_remove_e963907d" formatted="false">Remove</string>
+    <string name="zh_hc_renderer_6d79b469" formatted="false">Renderer:</string>
+    <string name="zh_hc_renderer_driver_9fc9b4e8" formatted="false">Renderer Driver</string>
+    <string name="zh_hc_renderer_e72008fa" formatted="false">Renderer</string>
+    <string name="zh_hc_rendering_e066e804" formatted="false">Rendering</string>
+    <string name="zh_hc_reset_hud_3a79d016" formatted="false">Reset HUD</string>
+    <string name="zh_hc_reset_mp3_3307b109" formatted="false">Reset MP3</string>
+    <string name="zh_hc_reset_properties_bfff3fae" formatted="false">Reset Properties</string>
+    <string name="zh_hc_reshade_c8e7f6d5" formatted="false">ReShade</string>
+    <string name="zh_hc_right_analog_stick_settings_739f7808" formatted="false">Right Analog Stick Settings</string>
+    <string name="zh_hc_runtime_and_interface_564c0689" formatted="false">Runtime and interface</string>
+    <string name="zh_hc_save_preset_008df194" formatted="false">Save Preset</string>
+    <string name="zh_hc_select_animation_png_folder_358899e1" formatted="false">Select Animation (*.png) Folder</string>
+    <string name="zh_hc_select_mp3_689cd6a7" formatted="false">Select MP3</string>
+    <string name="zh_hc_select_music_source_05196cd8" formatted="false">Select Music Source:</string>
+    <string name="zh_hc_select_wallpaper_7eeb5179" formatted="false">Select Wallpaper</string>
+    <string name="zh_hc_sensitivity_100_e474db75" formatted="false">Sensitivity: 100%</string>
+    <string name="zh_hc_set_bg_music_71017f48" formatted="false">Set BG Music</string>
+    <string name="zh_hc_set_steamgrid_api_key_cover_art_2c219e33" formatted="false">Set SteamGrid API Key? (Cover Art)</string>
+    <string name="zh_hc_settings_c7f73bb5" formatted="false">Settings</string>
+    <string name="zh_hc_sharpness_74ff2464" formatted="false">Sharpness</string>
+    <string name="zh_hc_shortcut_export_path_8915cb1b" formatted="false">Shortcut Export Path</string>
+    <string name="zh_hc_show_keyboard_67bce6d1" formatted="false">Show Keyboard</string>
+    <string name="zh_hc_show_logs_2dbd3a4a" formatted="false">Show Logs</string>
+    <string name="zh_hc_slow_33dcec9c" formatted="false">Slow</string>
+    <string name="zh_hc_soft_stretch_451eefc3" formatted="false">Soft Stretch</string>
+    <string name="zh_hc_steamgriddb_api_key_282d9a20" formatted="false">SteamGridDB API Key</string>
+    <string name="zh_hc_storage_9e092dda" formatted="false">Storage</string>
+    <string name="zh_hc_strength_24d3e4fd" formatted="false">Strength</string>
+    <string name="zh_hc_style_99a0efc6" formatted="false">Style</string>
+    <string name="zh_hc_super_resolution_95b6f675" formatted="false">Super Resolution</string>
+    <string name="zh_hc_swap_red_blue_channels_23d680ff" formatted="false">Swap red/blue channels</string>
+    <string name="zh_hc_task_manager_3bf0f4bc" formatted="false">Task Manager</string>
+    <string name="zh_hc_texture_filter_5b421b6e" formatted="false">Texture Filter</string>
+    <string name="zh_hc_theme_a797e309" formatted="false">Theme</string>
+    <string name="zh_hc_theme_color_29ddb7dc" formatted="false">Theme Color</string>
+    <string name="zh_hc_toggle_fullscreen_36fd1da9" formatted="false">Toggle Fullscreen</string>
+    <string name="zh_hc_toggle_relative_mouse_movement_5ddb7d55" formatted="false">Toggle Relative Mouse Movement</string>
+    <string name="zh_hc_touch_controls_opacity_d153fba9" formatted="false">Touch Controls Opacity</string>
+    <string name="zh_hc_up_directory_4deae380" formatted="false">Up Directory</string>
+    <string name="zh_hc_upscaler_mode_97614a00" formatted="false">Upscaler Mode</string>
+    <string name="zh_hc_use_square_deadzone_left_stick_8ba1d9bf" formatted="false">Use Square Deadzone (Left Stick)</string>
+    <string name="zh_hc_vibration_39b345e7" formatted="false">Vibration</string>
+    <string name="zh_hc_wave_a24d6011" formatted="false">Wave</string>
+    <string name="zh_hc_winlator_path_b1ee11f4" formatted="false">Winlator Path</string>
+    <string name="zh_hc_youtube_video_url_not_all_youtube_videos_are_sup_1e80db58" formatted="false">YouTube Video URL (Not all YouTube Videos are supported):</string>
 </resources>
