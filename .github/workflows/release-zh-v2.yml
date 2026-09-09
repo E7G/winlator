@@ -1,0 +1,102 @@
+name: Build and Release Ludashi 4.0 Chinese v2
+
+on:
+  push:
+    branches:
+      - fix/zh-cn-downloads-v2
+    paths:
+      - .github/workflows/release-zh-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify-build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify Simplified Chinese localization
+        run: python3 tools/check_zh_strings.py
+
+      - name: Clone libadrenotools specific commit
+        run: |
+          rm -rf app/src/main/cpp/adrenotools
+          git clone https://github.com/Pipetto-crypto/libadrenotools.git app/src/main/cpp/adrenotools
+          cd app/src/main/cpp/adrenotools
+          git checkout 8483dfdaa2abf97ee89ad0e5f337e7b508550c6b
+
+      - name: Clone linkernsbypass inside adrenotools
+        run: |
+          mkdir -p app/src/main/cpp/adrenotools/lib
+          git clone https://github.com/Pipetto-crypto/liblinkernsbypass.git app/src/main/cpp/adrenotools/lib/linkernsbypass
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y glslang-tools ninja-build zstd
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease
+
+      - name: Prepare release asset
+        id: asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          OUT="Winlator-Ludashi-4.0-E7G-ZH-CN-v2-arm64-v8a.apk"
+          cp "$APK" "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          sha256sum "$OUT" | tee "$OUT.sha256"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Winlator-Ludashi-4.0-E7G-ZH-CN-v2
+          path: |
+            ${{ steps.asset.outputs.path }}
+            ${{ steps.asset.outputs.path }}.sha256
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v4.0-E7G-zh.2
+          APK: ${{ steps.asset.outputs.path }}
+        run: |
+          set -euo pipefail
+          NOTES=$(cat <<'EOF'
+          Winlator Ludashi 4.0 E7G 简体中文版 v2
+
+          - 基于 Ludashi 4.0，同步保留 E7G 中文版现有功能
+          - 补齐 4.0 Jetpack Compose / Kotlin 新界面硬编码英文
+          - 补齐 Java、XML 与显示数组的简体中文
+          - 扩展汉化审计：XML / Java / Kotlin Compose 均无未处理的常见 UI 英文候选
+          - GitHub 组件下载增加国内友好的多级回退：gh-proxy.com → ghproxy.net → 官方源
+          - Proton、远程驱动目录与驱动安装统一接入回退下载器
+          - 下载增加连接/读取超时、HTTP 状态、空文件、HTML 错误页与临时文件保护
+          - Proton 原有文件大小与 SHA-256 完整性校验继续保留
+          - arm64-v8a Release APK
+          EOF
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" "$APK.sha256" --clobber
+          else
+            gh release create "$TAG" "$APK" "$APK.sha256" --target "$GITHUB_SHA" --title "Winlator Ludashi 4.0 E7G 中文版 v2" --notes "$NOTES"
+          fi
