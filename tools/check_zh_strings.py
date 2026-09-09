@@ -33,12 +33,15 @@ print(f'Obsolete/extra Chinese strings: {len(extra)}')
 for key in extra:
     print(f'EXTRA\t{key}')
 
-# Product names, APIs and low-level graphics/runtime identifiers are intentionally kept unchanged.
+# Product names, APIs, MIME types and internal identifiers that are intentionally not translated.
 allowed_literals = {
     'Winlator', 'Winlator CMOD', 'YouTube', 'FPS', 'GPU', 'CPU', 'RAM', 'HUD',
     'Wine', 'Proton', 'DXVK', 'VKD3D', 'Box64', 'Vulkan', 'Turnip', 'ReShade', 'DirectInput',
-    'FEXCore', 'SteamGridDB', 'DisplayX', 'ALSA', 'PulseAudio',
+    'FEXCore', 'SteamGridDB', 'DisplayX', 'ALSA', 'PulseAudio', 'Zink', 'Freedreno',
     'Drive D:', 'Drive C', '/storage/emulated/0/Download', 'FolderName', 'default_version',
+    'downloadable_contents_url', 'adrenotools:', '.UTF-8', 'text', 'version', 'execArgs', 'lc_all',
+    'sharpnessLevel', 'sharpnessDenoise', 'image/*', 'gpuName', 'blacklistedExtensions',
+    'framerate', 'videoMemorySize', 'Wine ${model.wineVersion}', '$usedPercent%', 'CPU$index', '$letter:',
     '-force-gfx-direct', '-force-d3d11-singlethreaded', '-force-dx9', '-force-d3d9', '-force-d3d11',
     '--force-gfx-direct', '--force-d3d11-singlethreaded', '--force-dx9', '--force-d3d9', '--force-d3d11',
 }
@@ -55,6 +58,9 @@ def looks_unlocalized(val):
     if not val or val in allowed_literals:
         return False
     if cjk_re.search(val):
+        return False
+    lower = val.lower()
+    if '<a href=' in lower:
         return False
     if val.startswith(('http://', 'https://', '/', '@', '${')):
         return False
@@ -80,11 +86,12 @@ print(f'Unlocalized XML English candidates: {len(xml_hits)}')
 for p, line, val in xml_hits:
     print(f'HARDCODED_XML\t{p}:{line}\t{val}')
 
-# Java UI-string audit. Include dialog buttons and Toasts in addition to setters.
+# Java UI-string audit. Include dialog buttons, Toasts and progress-dialog helper calls.
 java_hits = []
 java_context = re.compile(
     r'(?:\.(?:setText|setHint|setTitle|setMessage|setContentDescription|setPositiveButton|setNegativeButton|setNeutralButton)\s*\('
-    r'|Toast\.makeText\s*\()'
+    r'|Toast\.makeText\s*\('
+    r'|showProgressDialog\s*\()'
 )
 for p in Path('app/src/main/java').rglob('*.java'):
     lines = p.read_text(encoding='utf-8', errors='ignore').splitlines()
@@ -99,7 +106,7 @@ print(f'Hard-coded Java UI English candidates: {len(java_hits)}')
 for p, line, val in java_hits:
     print(f'HARDCODED_JAVA\t{p}:{line}\t{val}')
 
-# Jetpack Compose / Kotlin audit. Previous checks missed the new 4.0 Compose UI entirely.
+# Jetpack Compose / Kotlin audit. The 4.0 UI is heavily Compose-based, so Kotlin must be checked too.
 kotlin_hits = []
 kotlin_ui_markers = (
     'Text(', 'SectionTitle(', 'NavigationRow(', 'ToggleRow(', 'EditableValueCard(',
@@ -114,6 +121,9 @@ for p in Path('app/src/main/java').rglob('*.kt'):
             continue
         for m in quoted_re.finditer(line):
             val = m.group(1).strip()
+            # LazyColumn item keys are implementation IDs, not visible text even when a SectionTitle is on the same line.
+            if 'item("' in line and re.fullmatch(r'[a-z0-9_.-]+', val):
+                continue
             # Ignore obvious internal preference keys/IDs while still flagging visible one-word labels.
             if re.fullmatch(r'[a-z0-9_.-]+', val) and not any(marker in line for marker in ('Text(', 'SectionTitle(', 'contentDescription =')):
                 continue
