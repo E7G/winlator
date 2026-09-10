@@ -2,6 +2,10 @@ name: Android CI Bionic
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - feat/vortek-cmod
 
 permissions:
   contents: write
@@ -40,7 +44,15 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y glslang-tools ninja-build zstd
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            libx11-dev \
+            glslang-tools \
+            ninja-build \
+            zstd
+
+      - name: Prepare Vortek cmod integration
+        run: bash scripts/prepare-vortek.sh
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -51,6 +63,6 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Bionic-Build-${{ github.run_number }}
+          name: Bionic-Vortek-Build-${{ github.run_number }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
