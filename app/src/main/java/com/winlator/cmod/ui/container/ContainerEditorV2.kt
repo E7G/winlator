@@ -798,17 +798,20 @@ private fun ContainerCategoryV2(
                 var customScreenSelected by remember {
                     mutableStateOf(screenEntries.none { normalizeResolution(it).equals(s.screen, true) })
                 }
-                val shownScreen = if (customScreenSelected) "Custom"
-                else screenEntries.firstOrNull { normalizeResolution(it).equals(s.screen, true) } ?: "Custom"
+                val customEntry = screenEntries.firstOrNull {
+                    it.equals("Custom", true) || it == "自定义"
+                } ?: "Custom"
+                val shownScreen = if (customScreenSelected) customEntry
+                else screenEntries.firstOrNull { normalizeResolution(it).equals(s.screen, true) } ?: customEntry
                 SettingChoice("Screen Size", shownScreen, screenEntries) {
-                    if (it.equals("Custom", true)) {
+                    if (it == customEntry) {
                         customScreenSelected = true
                     } else {
                         customScreenSelected = false
                         s.screen = normalizeResolution(it)
                     }
                 }
-                if (shownScreen == "Custom") {
+                if (shownScreen == customEntry) {
                     SettingsDivider()
                     SettingText("自定义分辨率", s.screen) { s.screen = it }
                 }

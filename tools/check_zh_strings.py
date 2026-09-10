@@ -33,6 +33,41 @@ print(f'Obsolete/extra Chinese strings: {len(extra)}')
 for key in extra:
     print(f'EXTRA\t{key}')
 
+# Display string-array audit. Value/protocol arrays are intentionally excluded.
+import xml.etree.ElementTree as ET
+
+def read_arrays(path):
+    if not path.exists():
+        return {}
+    root = ET.parse(path).getroot()
+    return {
+        node.attrib.get('name', ''): [''.join(item.itertext()).strip() for item in node.findall('item')]
+        for node in root.findall('string-array')
+    }
+
+base_arrays = read_arrays(BASE_DIR / 'arrays.xml')
+zh_arrays = read_arrays(ZH_DIR / 'arrays.xml')
+required_display_arrays = {
+    'screen_size_entries', 'binding_type_entries', 'dxvk_max_device_memory_entries',
+    'device_memory_entries', 'wincomponent_entries', 'desktop_theme_entries',
+    'desktop_background_type_entries', 'startup_selection_entries', 'button_options',
+    'touchscreenInputModesEntries', 'transformCapturedPointerEntries',
+}
+array_issues = []
+for name in sorted(required_display_arrays):
+    base_items = base_arrays.get(name)
+    zh_items = zh_arrays.get(name)
+    if base_items is None:
+        array_issues.append((name, 'missing base array'))
+    elif zh_items is None:
+        array_issues.append((name, 'missing zh-rCN array'))
+    elif len(base_items) != len(zh_items):
+        array_issues.append((name, f'item count {len(zh_items)} != {len(base_items)}'))
+
+print(f'Chinese display-array issues: {len(array_issues)}')
+for name, reason in array_issues:
+    print(f'ARRAY\t{name}\t{reason}')
+
 # Product names, APIs, MIME types and internal identifiers that are intentionally not translated.
 allowed_literals = {
     'Winlator', 'Winlator CMOD', 'YouTube', 'FPS', 'GPU', 'CPU', 'RAM', 'HUD',
@@ -137,5 +172,5 @@ print(f'Hard-coded Kotlin/Compose UI English candidates: {len(kotlin_hits)}')
 for p, line, val in kotlin_hits:
     print(f'HARDCODED_KOTLIN\t{p}:{line}\t{val}')
 
-if missing or xml_hits or java_hits or kotlin_hits:
+if missing or array_issues or xml_hits or java_hits or kotlin_hits:
     raise SystemExit(1)
