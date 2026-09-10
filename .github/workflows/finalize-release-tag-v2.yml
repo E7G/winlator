@@ -1,0 +1,47 @@
+name: Finalize Chinese v2 release tag
+
+on:
+  push:
+    branches:
+      - fix/zh-cn-downloads-v2
+    paths:
+      - .github/workflows/finalize-release-tag-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move tag to verified build and refresh release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v4.0-E7G-zh.2
+          TARGET: 58c88a945e7b2627569bdac645bde5e047e5f10f
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "$TAG" "$TARGET"
+          git push origin "refs/tags/$TAG" --force
+
+          cat > /tmp/release-notes.md <<'EOF'
+          Winlator Ludashi 4.0 E7G 简体中文版 v2
+
+          - 补齐容器编辑、游戏库、游戏详情、输入控制、组件选择等 Compose/Kotlin 新界面的中文
+          - 补齐 Java、XML 与显示数组的简体中文，并增加 string-array 覆盖审计
+          - 显示文本与配置内部值分离，修复“自定义分辨率”等中文显示值可能污染容器配置的问题
+          - GitHub 公共组件下载使用国内友好多级回退：wget.la → gh-proxy.com → ghproxy.net → 官方 GitHub
+          - Wine/Proton、DXVK、VKD3D、FEXCore、Box64/WOWBox64、远程驱动目录与驱动安装统一接入回退下载器
+          - 公共 API 元数据不经过 wget.la；不会把认证令牌或私有资源发送给第三方镜像
+          - 下载增加连接/读取超时、HTTP 状态、空文件、HTML 错误页与临时文件保护
+          - Proton 原有文件大小与 SHA-256 完整性校验继续保留
+          - 经 GitHub Actions 完整 assembleRelease 构建验证
+          - arm64-v8a Release APK
+          EOF
+          gh release edit "$TAG" --title "Winlator Ludashi 4.0 E7G 中文版 v2" --notes-file /tmp/release-notes.md
