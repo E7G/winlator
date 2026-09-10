@@ -3,10 +3,11 @@ name: Apply Chinese localization
 on:
   push:
     branches:
-      - sync/ludashi-4.0-zh
+      - fix/zh-cn-downloads-v2
     paths:
-      - tools/apply_full_zh_xml.py
+      - tools/apply_zh_runtime_v2.py
       - .github/workflows/apply-i18n.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -18,9 +19,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply localization migration
-        run: python3 tools/apply_full_zh_xml.py
-      - name: Commit generated localization
+
+      - name: Apply runtime localization and download migration
+        run: python3 tools/apply_zh_runtime_v2.py
+
+      - name: Verify existing Chinese resources
+        run: python3 tools/check_zh_strings.py
+
+      - name: Commit generated fixes
         run: |
           if git diff --quiet && [ -z "$(git status --porcelain)" ]; then
             echo "No localization changes required"
@@ -28,6 +34,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/res app/src/main/java
-          git commit -m "feat(i18n): fully localize Ludashi 4.0 UI"
-          git push origin HEAD:sync/ludashi-4.0-zh
+          git add app/src/main/java app/src/main/res
+          git commit -m "fix(i18n): localize runtime UI and improve China downloads"
+          git push origin HEAD:fix/zh-cn-downloads-v2
