@@ -6,6 +6,7 @@ on:
       - fix/zh-cn-downloads-v2
     paths:
       - tools/apply_zh_runtime_v2.py
+      - tools/finalize_zh_v2.py
       - .github/workflows/apply-i18n.yml
   workflow_dispatch:
 
@@ -23,7 +24,10 @@ jobs:
       - name: Apply runtime localization and download migration
         run: python3 tools/apply_zh_runtime_v2.py
 
-      - name: Verify existing Chinese resources
+      - name: Finalize localized display-array compatibility
+        run: python3 tools/finalize_zh_v2.py
+
+      - name: Verify Chinese localization
         run: python3 tools/check_zh_strings.py
 
       - name: Commit generated fixes
@@ -34,6 +38,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/java app/src/main/res
-          git commit -m "fix(i18n): localize runtime UI and improve China downloads"
+          git add app/src/main/java app/src/main/res tools/check_zh_strings.py
+          git commit -m "fix(i18n): finalize localized UI compatibility"
           git push origin HEAD:fix/zh-cn-downloads-v2
