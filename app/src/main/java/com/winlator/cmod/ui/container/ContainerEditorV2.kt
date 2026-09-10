@@ -598,13 +598,13 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                     ) {
                         item {
                             Text(
-                                "Container settings",
+                                "容器设置",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(8.dp)
                             )
                         }
-                        items(categories) { item -> ContainerNavItemV2(item, category == item) { category = item } }
+                        items(categories) { item -> ContainerNavItemV2(containerCategoryLabelV2(item), category == item) { category = item } }
                     }
                 }
                 LazyColumn(
@@ -628,7 +628,7 @@ internal fun ContainerEditorV2(editId: Int?, onBack: () -> Unit, onCreated: () -
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(categories) { item -> ContainerNavItemV2(item, category == item) { category = item } }
+                    items(categories) { item -> ContainerNavItemV2(containerCategoryLabelV2(item), category == item) { category = item } }
                 }
                 LazyColumn(
                     Modifier.fillMaxSize().padding(horizontal = 14.dp),
@@ -773,12 +773,12 @@ private fun ContainerCategoryV2(
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(
-                                "Wallpaper image",
+                                "壁纸图片",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                if (s.wallpaperStamp > 0L) "Custom image" else "Default wallpaper",
+                                if (s.wallpaperStamp > 0L) "自定义图片" else "默认壁纸",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Medium
                             )
@@ -1102,6 +1102,15 @@ private fun ContainerVulkanExtensionsV2(
             }
         )
     }
+}
+
+private fun containerCategoryLabelV2(value: String): String = when (value) {
+    "General" -> "常规"
+    "Video" -> "显示"
+    "Compatibility" -> "兼容性"
+    "Input" -> "输入"
+    "Advanced" -> "高级"
+    else -> value
 }
 
 private fun loadContainerGpuNamesV2(context: Context): List<String> {

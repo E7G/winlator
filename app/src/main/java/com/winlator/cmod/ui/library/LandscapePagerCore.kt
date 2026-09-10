@@ -181,7 +181,7 @@ internal fun LandscapePagerCore(
                             shape = CircleShape,
                             color = Color.Black.copy(.62f),
                             contentColor = Color.White
-                        ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, "Play") } }
+                        ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, "启动游戏") } }
                         footerActions(item)
                     }
                 }

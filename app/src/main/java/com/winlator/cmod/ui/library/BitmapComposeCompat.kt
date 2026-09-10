@@ -132,12 +132,12 @@ internal fun LibraryRoot(
                 Spacer(Modifier.height(7.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     LibraryFilter.values().forEach { option ->
-                        LibraryFilterChip(option.name, option == filter) { filterName = option.name }
+                        LibraryFilterChip(libraryFilterLabel(option), option == filter) { filterName = option.name }
                     }
                 }
             },
             footerActions = { item ->
-                IconButton(onClick = { menu = item }) { Icon(Icons.Outlined.MoreVert, "More options", tint = Color.White) }
+                IconButton(onClick = { menu = item }) { Icon(Icons.Outlined.MoreVert, "更多选项", tint = Color.White) }
             }
         )
         menu?.let { LibraryItemMenuCompat(it, cb) { menu = null } }
@@ -156,14 +156,14 @@ internal fun LibraryRoot(
         }
         Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             LibraryFilter.values().forEach { option ->
-                LibraryFilterChip(option.name, option == filter) { filterName = option.name }
+                LibraryFilterChip(libraryFilterLabel(option), option == filter) { filterName = option.name }
             }
         }
         if (visible.isEmpty()) {
             if (query.isNotBlank() || (filter != LibraryFilter.All && items.isNotEmpty())) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        if (query.isNotBlank()) "No games match your search" else "No games in this section",
+                        if (query.isNotBlank()) "没有匹配搜索条件的游戏" else "此分类中没有游戏",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -218,7 +218,7 @@ private fun LibraryLandscapeHeader(
 ) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
-            "Library",
+            "游戏库",
             color = if (onArtwork) Color.White else MaterialTheme.colorScheme.onBackground,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Medium
@@ -250,15 +250,15 @@ private fun LibraryOrientationMenu(activity: MainActivity?) {
     Box {
         LibraryTopIcon(Icons.Outlined.MoreVert, false) { expanded = true }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            OrientationToggleMenuItem("Lock screen orientation", orientationState.first) {
+            OrientationToggleMenuItem("锁定屏幕方向", orientationState.first) {
                 activity?.toggleOrientationLock()
                 orientationRevision++
             }
-            OrientationToggleMenuItem("Vertical mode", orientationState.second) {
+            OrientationToggleMenuItem("竖屏模式", orientationState.second) {
                 activity?.toggleVerticalMode()
                 orientationRevision++
             }
-            OrientationToggleMenuItem("Horizontal mode", orientationState.third) {
+            OrientationToggleMenuItem("横屏模式", orientationState.third) {
                 activity?.toggleHorizontalMode()
                 orientationRevision++
             }
@@ -288,6 +288,12 @@ private fun LibraryTopIcon(icon: ImageVector, selected: Boolean, click: () -> Un
         color = background,
         contentColor = content
     ) { Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { Icon(icon, null, modifier = Modifier.size(23.dp)) } }
+}
+
+private fun libraryFilterLabel(value: LibraryFilter): String = when (value) {
+    LibraryFilter.All -> "全部"
+    LibraryFilter.Favorites -> "收藏"
+    LibraryFilter.Recent -> "最近"
 }
 
 @Composable
@@ -401,14 +407,14 @@ private fun PlayCompat(item: LibraryItem, cb: LibraryCallbacks, overlay: Boolean
         shape = CircleShape,
         color = if (overlay) Color.Black.copy(.72f) else MaterialTheme.colorScheme.surfaceVariant,
         contentColor = if (overlay) Color.White else MaterialTheme.colorScheme.onSurface
-    ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, "Play") } }
+    ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.PlayArrow, "启动游戏") } }
 }
 
 @Composable
 private fun MenuButtonCompat(item: LibraryItem, cb: LibraryCallbacks, light: Boolean) {
     var open by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }) {
-        Icon(Icons.Outlined.MoreVert, "More options", tint = if (light) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(Icons.Outlined.MoreVert, "更多选项", tint = if (light) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (open) LibraryItemMenuCompat(item, cb) { open = false }
 }
@@ -450,7 +456,7 @@ internal fun LibraryItemMenuCompat(item: LibraryItem, cb: LibraryCallbacks, clos
             androidx.compose.material3.HorizontalDivider(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f)
             )
-            val favoriteLabel = if (item.favorite) "Unfavorite" else "Favorite"
+            val favoriteLabel = if (item.favorite) "取消收藏" else "收藏"
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -464,11 +470,11 @@ internal fun LibraryItemMenuCompat(item: LibraryItem, cb: LibraryCallbacks, clos
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_FAVORITE)
                 }
-                LibraryActionTileCompat(Icons.Outlined.Settings, "Configure", Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(Icons.Outlined.Settings, "配置", Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_SETTINGS)
                 }
-                LibraryActionTileCompat(Icons.Outlined.Photo, "Artwork", Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(Icons.Outlined.Photo, "封面图片", Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_ICON)
                 }
@@ -477,22 +483,22 @@ internal fun LibraryItemMenuCompat(item: LibraryItem, cb: LibraryCallbacks, clos
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                LibraryActionTileCompat(Icons.Outlined.Home, "Home screen", Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(Icons.Outlined.Home, "主屏幕", Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_HOME)
                 }
-                LibraryActionTileCompat(Icons.Outlined.ContentCopy, "Clone", Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(Icons.Outlined.ContentCopy, "克隆", Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_CLONE)
                 }
-                LibraryActionTileCompat(Icons.Outlined.FileUpload, "Export", Modifier.weight(1f), horizontal = landscape) {
+                LibraryActionTileCompat(Icons.Outlined.FileUpload, "导出", Modifier.weight(1f), horizontal = landscape) {
                     close()
                     cb.onAction(item.shortcutPath, LibraryComposeHost.ACTION_EXPORT)
                 }
             }
             LibraryActionTileCompat(
                 Icons.Outlined.DeleteOutline,
-                "Remove from library",
+                "从游戏库移除",
                 Modifier.fillMaxWidth().padding(top = 8.dp),
                 destructive = true,
                 horizontal = landscape

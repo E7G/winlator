@@ -174,8 +174,8 @@ internal fun OnboardingComponentsScreen(
                 Column(Modifier.weight(.9f).fillMaxHeight()) {
                     Text("选择组件", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                     Text(
-                        if (managerMode) "Install and manage runtime versions."
-                        else "Install a Wine or Proton layer before continuing.",
+                        if (managerMode) "安装和管理运行时版本。"
+                        else "继续之前请至少安装一个 Wine 或 Proton 运行时。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(14.dp))
@@ -208,8 +208,8 @@ internal fun OnboardingComponentsScreen(
                     if (!managerMode && !hasInstalledRuntime) {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            if (!ready.value) "Wait for $bundledRuntimeName to finish installing, or install another Wine/Proton version."
-                            else "Install at least one Wine or Proton version to continue.",
+                            if (!ready.value) "请等待 $bundledRuntimeName 安装完成，或安装其他 Wine/Proton 版本。"
+                            else "至少安装一个 Wine 或 Proton 版本后才能继续。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -234,8 +234,8 @@ internal fun OnboardingComponentsScreen(
                 item {
                     Text("选择组件", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        if (managerMode) "Install and manage runtime versions."
-                        else "Install as many versions as you want. At least one Wine or Proton is required.",
+                        if (managerMode) "安装和管理运行时版本。"
+                        else "可安装多个版本，但至少需要一个 Wine 或 Proton 运行时。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(16.dp))
@@ -278,8 +278,8 @@ internal fun OnboardingComponentsScreen(
                 if (!managerMode && !hasInstalledRuntime) {
                     item {
                         Text(
-                            if (!ready.value) "Continue unlocks when $bundledRuntimeName finishes installing or another Wine/Proton layer is installed."
-                            else "Install at least one Wine or Proton version to continue.",
+                            if (!ready.value) "$bundledRuntimeName 安装完成或安装其他 Wine/Proton 后即可继续。"
+                            else "至少安装一个 Wine 或 Proton 版本后才能继续。",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -292,7 +292,7 @@ internal fun OnboardingComponentsScreen(
             next = onContinue,
             landscape = landscape,
             nextEnabled = managerMode || hasInstalledRuntime,
-            nextLabel = if (managerMode) "Done" else "Continue"
+            nextLabel = if (managerMode) "完成" else "继续"
         )
     }
 }
@@ -312,7 +312,7 @@ private fun ComponentList(
         else if (list.isEmpty()) item {
             Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface) {
                 Text(
-                    "No components available in this category.",
+                    "此分类暂无可用组件。",
                     Modifier.padding(16.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -340,8 +340,8 @@ private fun SourceSelector(local: () -> Unit) {
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Row(Modifier.height(56.dp)) {
-            SourcePart(Icons.Outlined.Dns, "Winlator servers", true, {}, Modifier.weight(1f))
-            SourcePart(Icons.Outlined.Folder, "Local package", false, local, Modifier.weight(1f))
+            SourcePart(Icons.Outlined.Dns, "Winlator 在线源", true, {}, Modifier.weight(1f))
+            SourcePart(Icons.Outlined.Folder, "本地安装包", false, local, Modifier.weight(1f))
         }
     }
 }
@@ -361,6 +361,13 @@ private fun SourcePart(icon: ImageVector, label: String, selected: Boolean, clic
     }
 }
 
+private fun componentCategoryLabel(value: String): String = when (value) {
+    "Recommended" -> "推荐"
+    "Wine & Proton" -> "Wine / Proton"
+    "AdrenoTools" -> "Adreno 驱动"
+    else -> value
+}
+
 @Composable
 private fun CategorySelector(selected: String, select: (String) -> Unit) {
     Row(
@@ -374,7 +381,7 @@ private fun CategorySelector(selected: String, select: (String) -> Unit) {
                 color = if (selected == it) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
-                Text(it, Modifier.padding(horizontal = 13.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge)
+                Text(componentCategoryLabel(it), Modifier.padding(horizontal = 13.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -403,11 +410,11 @@ private fun CoreComponentCard(
             Column(Modifier.weight(1f)) {
                 Text(bundledRuntimeName, fontWeight = FontWeight.SemiBold)
                 val status = when {
-                    busy -> "Working…"
-                    installed && inUse -> "Bundled • Installed • In use"
-                    installed -> "Bundled • Installed"
-                    !ready.value -> "Bundled • Installing ${progress.value}%"
-                    else -> "Bundled • Not installed"
+                    busy -> "处理中…"
+                    installed && inUse -> "内置 • 已安装 • 使用中"
+                    installed -> "内置 • 已安装"
+                    !ready.value -> "内置 • 正在安装 ${progress.value}%"
+                    else -> "内置 • 未安装"
                 }
                 Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
@@ -451,9 +458,9 @@ private fun ComponentCard(
                     Text(item.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val status = when {
                         busy && installingProgress >= 0 ->
-                            "${installingLabel ?: "Installing"} • ${installingProgress}%"
-                        busy -> installingLabel ?: "Working…"
-                        item.inUse -> "${item.type} • In use"
+                            "${installingLabel ?: "正在安装"} • ${installingProgress}%"
+                        busy -> installingLabel ?: "处理中…"
+                        item.inUse -> "${item.type} • 使用中"
                         else -> item.type
                     }
                     Text(
@@ -503,8 +510,8 @@ private fun InstallProgressCard(label: String?, progress: Int) {
                 Column(Modifier.weight(1f)) {
                     Text("组件安装", fontWeight = FontWeight.SemiBold)
                     Text(
-                        if (progress >= 0) "${label ?: "Installing"} • ${progress}%"
-                        else label ?: "Installing component…",
+                        if (progress >= 0) "${label ?: "正在安装"} • ${progress}%"
+                        else label ?: "正在安装组件…",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,

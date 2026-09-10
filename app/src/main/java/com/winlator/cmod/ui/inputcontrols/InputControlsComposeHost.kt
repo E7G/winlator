@@ -121,7 +121,7 @@ object InputControlsComposeHost {
 
 @Composable
 private fun InputControlsScreen(model: InputControlsModel, callbacks: InputControlsCallbacks) {
-    val selectedName = model.profiles.firstOrNull { it.id == model.selectedProfileId }?.name ?: "-- Select Profile --"
+    val selectedName = model.profiles.firstOrNull { it.id == model.selectedProfileId }?.name ?: "-- 选择配置 --"
     val configuration = LocalConfiguration.current
     val landscape = configuration.screenWidthDp > configuration.screenHeightDp
     val activity = LocalContext.current as? MainActivity
@@ -140,7 +140,7 @@ private fun InputControlsScreen(model: InputControlsModel, callbacks: InputContr
     }
 
     Column(Modifier.fillMaxSize()) {
-        if (landscape) LandscapeMainNavigation(activity, R.id.main_menu_input_controls, "Input Controls")
+        if (landscape) LandscapeMainNavigation(activity, R.id.main_menu_input_controls, "输入控制")
         if (landscape) {
             Row(
                 modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp),
@@ -163,7 +163,7 @@ private fun InputControlsScreen(model: InputControlsModel, callbacks: InputContr
                 ) {
                     item {
                         Text(
-                            "EXTERNAL CONTROLLERS",
+                            "外接控制器",
                             modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.SemiBold,
@@ -193,7 +193,7 @@ private fun PortraitContent(model: InputControlsModel, selectedName: String, cal
         item { EditorButton(callbacks) }
         item {
             Text(
-                "EXTERNAL CONTROLLERS",
+                "外接控制器",
                 modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
@@ -207,17 +207,17 @@ private fun PortraitContent(model: InputControlsModel, selectedName: String, cal
 
 @Composable
 private fun ProfileSection(model: InputControlsModel, selectedName: String, callbacks: InputControlsCallbacks) {
-    SettingsCard(title = "Profile") {
+    SettingsCard(title = "配置") {
         ProfilePicker(model, selectedName, callbacks)
         Spacer(Modifier.height(10.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            RoundAction(Icons.Outlined.Add, "Add profile", callbacks::onAddProfile)
+            RoundAction(Icons.Outlined.Add, "添加配置", callbacks::onAddProfile)
             Spacer(Modifier.width(10.dp))
-            RoundAction(Icons.Outlined.Edit, "Edit profile", callbacks::onEditProfile)
+            RoundAction(Icons.Outlined.Edit, "编辑配置", callbacks::onEditProfile)
             Spacer(Modifier.width(10.dp))
-            RoundAction(Icons.Outlined.ContentCopy, "Duplicate profile", callbacks::onDuplicateProfile)
+            RoundAction(Icons.Outlined.ContentCopy, "复制配置", callbacks::onDuplicateProfile)
             Spacer(Modifier.width(10.dp))
-            RoundAction(Icons.Outlined.Delete, "Remove profile", callbacks::onRemoveProfile)
+            RoundAction(Icons.Outlined.Delete, "删除配置", callbacks::onRemoveProfile)
         }
     }
 }
@@ -313,7 +313,7 @@ private fun RoundAction(icon: androidx.compose.ui.graphics.vector.ImageVector, d
 @Composable
 private fun OpacityCard(initialPercent: Int, onOpacityChanged: (Int) -> Unit) {
     var opacity by remember(initialPercent) { mutableFloatStateOf(initialPercent.toFloat()) }
-    SettingsCard(title = "Overlay Opacity") {
+    SettingsCard(title = "按键叠加层透明度") {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Slider(
                 value = opacity,
@@ -359,9 +359,9 @@ private fun ControllerCard(controller: InputControllerItem, callbacks: InputCont
             Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
                 Text(controller.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${controller.bindings} bindings", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${controller.bindings} 个绑定", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (controller.bindings > 0) IconButton(onClick = { callbacks.onRemoveController(controller.index) }) { Icon(Icons.Outlined.Delete, "Remove controller") }
+            if (controller.bindings > 0) IconButton(onClick = { callbacks.onRemoveController(controller.index) }) { Icon(Icons.Outlined.Delete, "移除控制器") }
             Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(8.dp))
         }

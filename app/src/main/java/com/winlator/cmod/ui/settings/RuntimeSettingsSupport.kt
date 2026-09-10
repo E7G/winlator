@@ -52,6 +52,7 @@ import com.winlator.cmod.R
 import com.winlator.cmod.contents.AdrenotoolsManager
 import com.winlator.cmod.contents.ContentProfile
 import com.winlator.cmod.contents.ContentsManager
+import com.winlator.cmod.contents.Downloader
 import com.winlator.cmod.contents.RemoteDriverCatalog
 import com.winlator.cmod.core.DefaultVersion
 import com.winlator.cmod.core.GPUInformation
@@ -61,10 +62,7 @@ import com.winlator.cmod.core.WineRuntimeGuard
 import com.winlator.cmod.core.WineThemeManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
-import java.io.FileOutputStream
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -99,9 +97,7 @@ private suspend fun syncRemoteContents(context: Context, manager: ContentsManage
             val prefs = PreferenceManager.getDefaultSharedPreferences(context)
             val url = prefs.getString("downloadable_contents_url", ContentsManager.REMOTE_PROFILES)
                 ?: ContentsManager.REMOTE_PROFILES
-            OkHttpClient().newCall(Request.Builder().url(url).build()).execute().use { response ->
-                if (response.isSuccessful) response.body?.string()?.let(manager::setRemoteProfiles)
-            }
+            Downloader.downloadString(url)?.let(manager::setRemoteProfiles)
             manager.syncContents()
         }
     }
@@ -300,21 +296,9 @@ internal suspend fun installRuntimeComponent(
     } ?: return null
 
     val archive = File(context.cacheDir, "winz-${System.nanoTime()}")
+    val remoteUrl = profile.remoteUrl ?: return null
     val downloaded = withContext(Dispatchers.IO) {
-        try {
-            OkHttpClient().newCall(Request.Builder().url(profile.remoteUrl).build()).execute().use { response ->
-                if (!response.isSuccessful || response.body == null) {
-                    false
-                } else {
-                    response.body!!.byteStream().use { input ->
-                        FileOutputStream(archive).use { output -> input.copyTo(output, 64 * 1024) }
-                    }
-                    true
-                }
-            }
-        } catch (_: Exception) {
-            false
-        }
+        Downloader.downloadFile(remoteUrl, archive)
     }
     if (!downloaded) return null
 
@@ -383,12 +367,97 @@ internal fun writeConfig(config: String?, key: String, value: String, separator:
 internal fun normalizeResolution(value: String): String =
     value.replace(Regex("\\s*\\(.*\\)$"), "").trim()
 
-private fun settingDisplayLabel(value: String): String =
-    if (value == "Lanczos 2 (16-tap)") "Lanczos 2" else value
+private fun settingDisplayLabel(value: String): String = when (value) {
+    "Lanczos 2 (16-tap)" -> "Lanczos 2"
+    "Default" -> "默认"
+    "System" -> "系统"
+    "Custom" -> "自定义"
+    "Automatic" -> "自动"
+    "Low Latency" -> "低延迟"
+    "Stable" -> "稳定"
+    "Off" -> "关闭"
+    "Classic" -> "经典"
+    "Modern" -> "现代"
+    "Disabled" -> "禁用"
+    "Light" -> "浅色"
+    "Dark" -> "深色"
+    "Image" -> "图片"
+    "Solid Color" -> "纯色"
+    "disable" -> "禁用"
+    "enable" -> "启用"
+    "force" -> "强制"
+    "Bilinear" -> "双线性"
+    "Nearest neighbor" -> "最近邻"
+    "Snapdragon Super Resolution" -> "Snapdragon 超分辨率"
+    "AMD FidelityFX Super Resolution" -> "AMD FidelityFX 超分辨率"
+    "none" -> "无"
+    "partial" -> "部分"
+    "full" -> "完整"
+    "auto" -> "自动"
+    "software" -> "软件"
+    "compute" -> "计算着色器"
+    "Builtin (Wine)" -> "内置（Wine）"
+    "Native (Windows)" -> "原生（Windows）"
+    "Normal (Load all services)" -> "正常（加载全部服务）"
+    "Essential (Load only essential services)" -> "精简（仅加载必要服务）"
+    "Aggressive (Stop services on startup)" -> "激进（启动时停止服务）"
+    "Device" -> "设备默认"
+    else -> value
+}
 
 private fun settingFieldLabel(label: String): String = when (label) {
-    "Graphics Driver" -> "OpenGL Driver"
-    "Driver Version" -> "Vulkan Driver"
+    "Graphics Driver" -> "图形驱动"
+    "Driver Version" -> "Vulkan 驱动"
+    "Audio Driver" -> "音频驱动"
+    "Oboe latency" -> "Oboe 延迟模式"
+    "Oboe backend" -> "Oboe 后端"
+    "Winlator HUD" -> "Winlator 性能叠加层"
+    "Locale (LC_ALL)" -> "区域设置 (LC_ALL)"
+    "MIDI SoundFont" -> "MIDI 音色库"
+    "Fullscreen Stretched" -> "拉伸全屏"
+    "Desktop Theme" -> "桌面主题"
+    "Desktop Background" -> "桌面背景"
+    "Mouse Warp Override" -> "鼠标指针捕获"
+    "Screen Size" -> "屏幕分辨率"
+    "Renderer" -> "渲染器"
+    "Surface format" -> "表面格式"
+    "Bypass X11" -> "绕过 X11"
+    "Performance mode" -> "性能模式"
+    "Present at refresh rate" -> "按刷新率呈现"
+    "Present Mode" -> "呈现模式"
+    "Renderer Driver" -> "渲染器驱动"
+    "Texture Filter" -> "纹理过滤"
+    "Vulkan Version" -> "Vulkan 版本"
+    "GPU Name" -> "GPU 名称"
+    "Max Device Memory" -> "最大显存"
+    "Driver Present Mode" -> "驱动呈现模式"
+    "Sync Frame" -> "同步帧"
+    "Disable Present Wait" -> "禁用呈现等待"
+    "Resource Type" -> "资源类型"
+    "BCN Emulation" -> "BCN 模拟"
+    "BCN Emulation Type" -> "BCN 模拟类型"
+    "BCN Emulation Cache" -> "BCN 模拟缓存"
+    "DX Wrapper" -> "DirectX 转译层"
+    "DXVK Version" -> "DXVK 版本"
+    "VKD3D Version" -> "VKD3D 版本"
+    "VKD3D Feature Level" -> "VKD3D 功能级别"
+    "Max Frame Latency" -> "最大帧延迟"
+    "Async" -> "异步"
+    "Async Cache" -> "异步缓存"
+    "DDraw Wrapper" -> "DirectDraw 转译层"
+    "32-bit Emulator" -> "32 位模拟器"
+    "FEXCore Version" -> "FEXCore 版本"
+    "FEXCore Preset" -> "FEXCore 预设"
+    "Box64 Version" -> "Box64 版本"
+    "WOWBox64 Version" -> "WOWBox64 版本"
+    "Box64 Preset" -> "Box64 预设"
+    "Exclusive Input" -> "独占输入"
+    "Enable XInput" -> "启用 XInput"
+    "Enable DInput" -> "启用 DInput"
+    "Sync CPU Topology" -> "同步 CPU 拓扑"
+    "Processor Affinity" -> "处理器亲和性"
+    "Processor Affinity (32-bit apps)" -> "处理器亲和性（32 位应用）"
+    "Startup Selection" -> "启动模式"
     else -> label
 }
 
@@ -539,9 +608,9 @@ internal fun SettingWineRuntimeChoice(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(settingFieldLabel(label), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        selectedOption?.label ?: selectedId.ifBlank { "Choose a version" },
+                        selectedOption?.label ?: selectedId.ifBlank { "选择版本" },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
@@ -563,7 +632,7 @@ internal fun SettingWineRuntimeChoice(
                         Column {
                             Text(option.label, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (option.installed) 1f else .52f))
                             Text(
-                                if (option.installed) option.type else if (busy) "${option.type} • Downloading…" else "${option.type} • Download",
+                                if (option.installed) option.type else if (busy) "${option.type} • 正在下载…" else "${option.type} • 下载",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -605,7 +674,7 @@ internal fun SettingInstallChoice(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(settingFieldLabel(label), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(selected.ifBlank { "选择版本" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                 }
                 Icon(Icons.Outlined.KeyboardArrowDown, null)
@@ -717,7 +786,7 @@ internal fun SettingToggle(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Text(settingFieldLabel(label), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
         Switch(checked = checked, onCheckedChange = onChanged, enabled = enabled)
     }
 }
@@ -732,7 +801,7 @@ internal fun SettingText(
     OutlinedTextField(
         value = value,
         onValueChange = onChanged,
-        label = { Text(label) },
+        label = { Text(settingFieldLabel(label)) },
         modifier = Modifier.fillMaxWidth().padding(12.dp),
         minLines = minLines,
         maxLines = if (minLines > 1) 5 else 1,
@@ -747,7 +816,7 @@ internal fun CpuSelectorRow(
     onToggle: (Int, Boolean) -> Unit
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp)) {
-        Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(settingFieldLabel(title), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(7.dp)

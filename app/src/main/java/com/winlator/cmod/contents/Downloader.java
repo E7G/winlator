@@ -25,8 +25,9 @@ public class Downloader {
     private static final String USER_AGENT = "Winlator-E7G/4.0";
 
     // Mainland-friendly GitHub proxies. The official URL is always kept as the final fallback.
-    private static final String PRIMARY_GITHUB_PROXY = "https://gh-proxy.com/";
-    private static final String SECONDARY_GITHUB_PROXY = "https://ghproxy.net/";
+    private static final String PRIMARY_GITHUB_PROXY = "https://wget.la/";
+    private static final String SECONDARY_GITHUB_PROXY = "https://gh-proxy.com/";
+    private static final String TERTIARY_GITHUB_PROXY = "https://ghproxy.net/";
 
     public static boolean downloadFile(String address, File file) {
         return downloadFile(address, file, null);
@@ -135,7 +136,7 @@ public class Downloader {
             String host = url.getHost().toLowerCase(Locale.ENGLISH);
 
             // Avoid nesting a proxy URL inside another proxy URL.
-            if (host.equals("gh-proxy.com") || host.equals("ghproxy.net")) {
+            if (host.equals("wget.la") || host.equals("gh-proxy.com") || host.equals("ghproxy.net")) {
                 candidates.add(address);
                 return new ArrayList<>(candidates);
             }
@@ -149,9 +150,10 @@ public class Downloader {
             if (githubFileHost) {
                 candidates.add(PRIMARY_GITHUB_PROXY + address);
                 candidates.add(SECONDARY_GITHUB_PROXY + address);
+                candidates.add(TERTIARY_GITHUB_PROXY + address);
             } else if (host.equals("api.github.com")) {
-                // gh-proxy.com supports GitHub API requests; ghproxy.net is kept for file traffic only.
-                candidates.add(PRIMARY_GITHUB_PROXY + address);
+                // Never send API credentials to file mirrors. This path is only used for public, unauthenticated metadata.
+                candidates.add(SECONDARY_GITHUB_PROXY + address);
             }
         } catch (Exception ignored) {
         }
