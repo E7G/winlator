@@ -36,9 +36,7 @@ needle = "            src/timeline_semaphore.c)"
 replacement = "            src/timeline_semaphore.c\n            ../vortek_support/arrays.c\n            ../vortek_support/ring_buffer.c\n            ../vortek_support/sysvshared_memory.c)"
 if needle not in s:
     raise SystemExit("Unexpected upstream Vortek CMake layout")
-s = s.replace(needle, replacement)
-# ASharedMemory_create is provided by libandroid.
-p.write_text(s)
+p.write_text(s.replace(needle, replacement))
 PY
 
 # Add Vortek to E7G's existing native build without disturbing its renderer targets.
@@ -52,4 +50,50 @@ endif()
 EOF
 fi
 
-echo "Prepared Vortek 2.1 native server + guest Vulkan runtime."
+python3 - "$ROOT_DIR" <<'PY'
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+
+def replace_once(path: Path, old: str, new: str):
+    s = path.read_text()
+    if new in s:
+        return
+    if old not in s:
+        raise SystemExit(f"Patch anchor not found in {path}: {old[:100]!r}")
+    path.write_text(s.replace(old, new, 1))
+
+# Expose Vortek in the graphics-driver picker.
+arrays = root / "app/src/main/res/values/arrays.xml"
+replace_once(
+    arrays,
+    "        <item>Wrapper</item>\n    </string-array>\n    <string-array name=\"wrapper_graphics_driver_version_entries\">",
+    "        <item>Wrapper</item>\n        <item>Vortek</item>\n    </string-array>\n    <string-array name=\"wrapper_graphics_driver_version_entries\">",
+)
+
+activity = root / "app/src/main/java/com/winlator/cmod/XServerDisplayActivity.java"
+replace_once(
+    activity,
+    "import com.winlator.cmod.xenvironment.components.SysVSharedMemoryComponent;\n",
+    "import com.winlator.cmod.xenvironment.components.SysVSharedMemoryComponent;\nimport com.winlator.cmod.xenvironment.components.VortekRendererComponent;\n",
+)
+
+# Start the host Vulkan server before launching Wine when Vortek is selected.
+anchor = '''        environment.addComponent(\n                new XServerComponent(\n                        xServer,\n                        UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.XSERVER_PATH)));\n\n        if (audioDriver.equals("alsa")) {'''
+replacement = '''        environment.addComponent(\n                new XServerComponent(\n                        xServer,\n                        UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.XSERVER_PATH)));\n\n        if ("vortek".equalsIgnoreCase(graphicsDriver)) {\n            VortekRendererComponent.Options vortekOptions = new VortekRendererComponent.Options();\n            environment.addComponent(new VortekRendererComponent(\n                    this,\n                    xServer,\n                    UnixSocketConfig.createSocket(rootPath, UnixSocketConfig.VORTEK_SERVER_PATH),\n                    vortekOptions));\n        }\n\n        if (audioDriver.equals("alsa")) {'''
+replace_once(activity, anchor, replacement)
+
+# Vortek ships its own guest Vulkan ICD. Do not force cmod's wrapper ICD when selected.
+anchor = '''        envVars.put("VK_ICD_FILENAMES", imageFs.getShareDir() + "/vulkan/icd.d/wrapper_icd.aarch64.json");\n\n        File graphicsRuntimeMarker = new File(rootDir,'''
+replacement = '''        if ("vortek".equalsIgnoreCase(graphicsDriver)) {\n            Log.d("GraphicsDriverExtraction", "Installing Vortek 2.1 guest Vulkan ICD");\n            TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this,\n                    "graphics_driver/vortek-2.1.tzst", rootDir);\n            // Let the Vulkan loader discover Vortek's ICD JSON from /usr/share/vulkan/icd.d.\n            envVars.remove("VK_ICD_FILENAMES");\n            extractOpenGLDriver(rootDir);\n            if (!isMesaGlVersionOverrideManual()) envVars.put("MESA_GL_VERSION_OVERRIDE", "3.3");\n            if (!vkbasaltConfig.isEmpty()) {\n                envVars.put("ENABLE_VKBASALT", "1");\n                envVars.put("VKBASALT_CONFIG", vkbasaltConfig);\n            }\n            return;\n        }\n\n        envVars.put("VK_ICD_FILENAMES", imageFs.getShareDir() + "/vulkan/icd.d/wrapper_icd.aarch64.json");\n\n        File graphicsRuntimeMarker = new File(rootDir,'''
+replace_once(activity, anchor, replacement)
+
+# Vortek currently uses the device/system Vulkan driver in this cmod integration.
+# Keep its configuration picker honest instead of offering Turnip packages that are ignored.
+dialog = root / "app/src/main/java/com/winlator/cmod/contentdialog/GraphicsDriverConfigDialog.java"
+old = '''        for (String version : wrapperDefaultVersions) {\n            if (GPUInformation.isDriverSupported(version, context))\n                wrapperVersions.add(version);\n        }\n        \n        // Add installed versions from AdrenotoolsManager\n        AdrenotoolsManager adrenotoolsManager = new AdrenotoolsManager(context);\n        wrapperVersions.addAll(adrenotoolsManager.enumarateInstalledDrivers());'''
+new = '''        for (String version : wrapperDefaultVersions) {\n            if ("vortek".equalsIgnoreCase(graphicsDriver)) {\n                if ("System".equalsIgnoreCase(version)) wrapperVersions.add(version);\n            }\n            else if (GPUInformation.isDriverSupported(version, context)) {\n                wrapperVersions.add(version);\n            }\n        }\n\n        // Vortek is backed by the Android system Vulkan driver for the A5xx path.\n        if (!"vortek".equalsIgnoreCase(graphicsDriver)) {\n            AdrenotoolsManager adrenotoolsManager = new AdrenotoolsManager(context);\n            wrapperVersions.addAll(adrenotoolsManager.enumarateInstalledDrivers());\n        }'''
+replace_once(dialog, old, new)
+PY
+
+echo "Prepared Vortek 2.1 native server, guest ICD and cmod runtime wiring."
