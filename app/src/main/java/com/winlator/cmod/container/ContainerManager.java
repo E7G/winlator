@@ -9,8 +9,10 @@ import com.winlator.cmod.R;
 import com.winlator.cmod.contents.ContentsManager;
 import com.winlator.cmod.core.Callback;
 import com.winlator.cmod.core.FileUtils;
+import com.winlator.cmod.core.GPUInformation;
 import com.winlator.cmod.core.MSLink;
 import com.winlator.cmod.core.OnExtractFileListener;
+import com.winlator.cmod.core.OpenGLDriverDefaults;
 import com.winlator.cmod.core.TarCompressorUtils;
 import com.winlator.cmod.core.WineInfo;
 import com.winlator.cmod.core.WineThemeManager;
@@ -70,6 +72,15 @@ public class ContainerManager {
                             File configFile = container.getConfigFile();
                             if (!configFile.isFile() || configFile.length() == 0) continue;
                             JSONObject data = new JSONObject(FileUtils.readString(configFile));
+
+                            // Existing Mi Pad 4 / other Adreno 5xx containers may
+                            // still contain the old global Turnip defaults. Migrate
+                            // them once before Container.loadData() consumes them.
+                            if (GPUInformation.isAdreno5xxGPU(context)
+                                    && OpenGLDriverDefaults.initialize(context, data)) {
+                                FileUtils.writeString(configFile, data.toString());
+                            }
+
                             container.loadData(data);
                             containers.add(container);
                             maxContainerId = Math.max(maxContainerId, container.id);
@@ -151,6 +162,12 @@ public class ContainerManager {
                 return null;
             }
 
+            // Apply the A5xx compatibility profile before the new container is
+            // materialized, so every creation UI follows the same safe defaults.
+            if (GPUInformation.isAdreno5xxGPU(context)) {
+                OpenGLDriverDefaults.initialize(context, data);
+            }
+
             Container container = new Container(id, this);
             container.setRootDir(containerDir);
             container.loadData(data);
@@ -200,6 +217,7 @@ public class ContainerManager {
         dstContainer.setCPUList(srcContainer.getCPUList());
         dstContainer.setCPUListWoW64(srcContainer.getCPUListWoW64());
         dstContainer.setGraphicsDriver(srcContainer.getGraphicsDriver());
+        dstContainer.setGraphicsDriverConfig(srcContainer.getGraphicsDriverConfig());
         dstContainer.setDXWrapper(srcContainer.getDXWrapper());
         dstContainer.setDXWrapperConfig(srcContainer.getDXWrapperConfig());
         dstContainer.setAudioDriver(srcContainer.getAudioDriver());
@@ -210,6 +228,10 @@ public class ContainerManager {
         dstContainer.setBox64Preset(srcContainer.getBox64Preset());
         dstContainer.setDesktopTheme(srcContainer.getDesktopTheme());
         dstContainer.setWineVersion(srcContainer.getWineVersion());
+
+        if (GPUInformation.isAdreno5xxGPU(context)) {
+            OpenGLDriverDefaults.initialize(context, dstContainer);
+        }
         dstContainer.saveData();
 
         maxContainerId = Math.max(maxContainerId, id);
@@ -235,7 +257,7 @@ public class ContainerManager {
                         String filePath = file.getPath();
                         File desktopFile = new File(filePath.substring(0, filePath.lastIndexOf(".")) + ".desktop");
                         if (!desktopFile.exists()) {
-                            MSLink.createDesktopFile(file, context);
+                            MSLink.createDesktopFile(file, desktopFile);
                             shortcuts.add(new Shortcut(container, desktopFile));
                         }
                     }
