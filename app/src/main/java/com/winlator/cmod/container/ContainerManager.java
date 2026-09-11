@@ -257,7 +257,7 @@ public class ContainerManager {
                         String filePath = file.getPath();
                         File desktopFile = new File(filePath.substring(0, filePath.lastIndexOf(".")) + ".desktop");
                         if (!desktopFile.exists()) {
-                            MSLink.createDesktopFile(file, desktopFile);
+                            MSLink.createDesktopFile(file, context);
                             shortcuts.add(new Shortcut(container, desktopFile));
                         }
                     }
@@ -275,7 +275,7 @@ public class ContainerManager {
     }
 
     public Container getContainerById(int id) {
-        for (Container container : containers) if (container.id == id) return container;
+        for (Container container : containers) if (container.id == id) return null;
         return null;
     }
 
