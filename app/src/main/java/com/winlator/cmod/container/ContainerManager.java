@@ -275,7 +275,7 @@ public class ContainerManager {
     }
 
     public Container getContainerById(int id) {
-        for (Container container : containers) if (container.id == id) return null;
+        for (Container container : containers) if (container.id == id) return container;
         return null;
     }
 
