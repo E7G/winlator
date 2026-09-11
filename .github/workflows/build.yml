@@ -56,3 +56,5 @@ jobs:
           name: Bionic-Build-${{ github.run_number }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+# A5xx validation sync
