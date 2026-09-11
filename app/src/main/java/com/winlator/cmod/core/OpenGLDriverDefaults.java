@@ -26,7 +26,8 @@ public final class OpenGLDriverDefaults {
 
             String config = data.optString("graphicsDriverConfig", Container.DEFAULT_GRAPHICSDRIVERCONFIG);
             String selectedVersion = resolveDriverVersion(context, configValue(config, "version"));
-            boolean freedreno = isTurnipDriver(selectedVersion);
+            boolean adreno5xx = GPUInformation.isAdreno5xxGPU(context);
+            boolean freedreno = adreno5xx || isTurnipDriver(selectedVersion);
             EnvVars environment = new EnvVars(data.optString("envVars", Container.DEFAULT_ENV_VARS));
             boolean automaticOverride = false;
 
@@ -34,6 +35,11 @@ public final class OpenGLDriverDefaults {
                 environment.put(MESA_OVERRIDE, "3.3");
                 automaticOverride = true;
             }
+
+            // A5xx uses the Android/system Vulkan stack. Keep the requested Vulkan
+            // level conservative instead of advertising the 1.3 default used by
+            // modern Turnip drivers.
+            if (adreno5xx) config = putConfigValue(config, "vulkanVersion", "1.1");
 
             data.put("graphicsDriver", freedreno ? "freedreno" : Container.DEFAULT_GRAPHICS_DRIVER);
             data.put("graphicsDriverConfig", putConfigValue(config, "version", selectedVersion));
@@ -52,7 +58,8 @@ public final class OpenGLDriverDefaults {
 
         String config = container.getGraphicsDriverConfig();
         String selectedVersion = resolveDriverVersion(context, configValue(config, "version"));
-        boolean freedreno = isTurnipDriver(selectedVersion);
+        boolean adreno5xx = GPUInformation.isAdreno5xxGPU(context);
+        boolean freedreno = adreno5xx || isTurnipDriver(selectedVersion);
         EnvVars environment = new EnvVars(container.getEnvVars());
         boolean automaticOverride = false;
 
@@ -60,6 +67,8 @@ public final class OpenGLDriverDefaults {
             environment.put(MESA_OVERRIDE, "3.3");
             automaticOverride = true;
         }
+
+        if (adreno5xx) config = putConfigValue(config, "vulkanVersion", "1.1");
 
         container.setGraphicsDriver(freedreno ? "freedreno" : Container.DEFAULT_GRAPHICS_DRIVER);
         container.setGraphicsDriverConfig(putConfigValue(config, "version", selectedVersion));
@@ -71,11 +80,14 @@ public final class OpenGLDriverDefaults {
     }
 
     public static boolean isTurnipDriver(String version) {
-        String value = version == null ? "" : version.toLowerCase(Locale.ROOT);
-        return value.contains("turnip") || value.startsWith("tu-") || value.startsWith("mesa-turnip");
+        return GPUInformation.isTurnipDriverName(version);
     }
 
     private static String resolveDriverVersion(Context context, String configuredVersion) {
+        // Turnip has no A5xx support. The existing default-selection code uses
+        // WRAPPER_ADRENO, which resolves to System on A5xx in DefaultVersion.
+        if (GPUInformation.isAdreno5xxGPU(context)) return DefaultVersion.WRAPPER;
+
         String candidate = isTurnipDriver(configuredVersion)
                 ? configuredVersion
                 : DefaultVersion.WRAPPER_ADRENO;
