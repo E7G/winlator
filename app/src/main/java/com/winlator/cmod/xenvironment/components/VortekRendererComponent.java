@@ -109,7 +109,8 @@ public class VortekRendererComponent extends EnvironmentComponent implements Con
 
         Drawable drawable = window.getContent();
         synchronized (drawable.renderLock) {
-            drawable.updateDirect();
+            Runnable onDrawListener = drawable.getOnDrawListener();
+            if (onDrawListener != null) onDrawListener.run();
         }
     }
 
