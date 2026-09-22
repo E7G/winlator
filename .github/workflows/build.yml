@@ -2,6 +2,9 @@ name: Android CI Bionic
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/a5xx-vulkan-refresh-20260922
 
 permissions:
   contents: write
@@ -30,6 +33,11 @@ jobs:
           git clone https://github.com/Pipetto-crypto/liblinkernsbypass.git \
             app/src/main/cpp/adrenotools/lib/linkernsbypass
 
+      - name: Prepare upstream Vortek runtime
+        run: |
+          chmod +x scripts/prepare-vortek.sh
+          scripts/prepare-vortek.sh
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -46,11 +54,30 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build with Gradle
-        run: ./gradlew assembleRelease
+        id: gradle-build
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew assembleRelease --stacktrace 2>&1 | tee build.log
 
-      - name: Upload APK Artifact
+      - name: Show compiler errors
+        if: failure() && steps.gradle-build.outcome == 'failure'
+        run: |
+          echo '===== build.log tail ====='
+          tail -n 500 build.log || true
+
+      - name: Upload build log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Bionic-Build-${{ github.run_number }}
+          name: Vortek-build-log-${{ github.run_number }}
+          path: build.log
+          if-no-files-found: warn
+
+      - name: Upload APK Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bionic-Vortek-Build-${{ github.run_number }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
