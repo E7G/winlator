@@ -22,6 +22,17 @@ cp -a "$UPSTREAM_DIR/app/src/main/cpp/winlator/include" "$CPP_DIR/winlator/inclu
 cp "$UPSTREAM_DIR/app/src/main/cpp/winlator/src/arrays.c" "$CPP_DIR/vortek_support/arrays.c"
 cp "$UPSTREAM_DIR/app/src/main/cpp/winlator/src/ring_buffer.c" "$CPP_DIR/vortek_support/ring_buffer.c"
 cp "$UPSTREAM_DIR/app/src/main/cpp/winlator/src/sysvshared_memory.c" "$CPP_DIR/vortek_support/sysvshared_memory.c"
+cat > "$CPP_DIR/vortek_support/ahardware_buffer_compat.c" <<'EOF'
+#include <android/hardware_buffer.h>
+#include "native_handle.h"
+
+extern const native_handle_t* AHardwareBuffer_getNativeHandle(const AHardwareBuffer* buffer);
+
+int AHardwareBuffer_getFd(AHardwareBuffer* hardwareBuffer) {
+    const native_handle_t* nativeHandle = AHardwareBuffer_getNativeHandle(hardwareBuffer);
+    return nativeHandle != NULL && nativeHandle->numFds > 0 ? nativeHandle->data[0] : -1;
+}
+EOF
 cp "$UPSTREAM_DIR/app/src/main/assets/graphics_driver/vortek-2.1.tzst" "$ASSET_DIR/vortek-2.1.tzst"
 
 # E7G/cmod uses a different Java package and a different adrenotools directory.
@@ -36,7 +47,7 @@ import sys
 p = Path(sys.argv[1])
 s = p.read_text()
 needle = "            src/timeline_semaphore.c)"
-replacement = "            src/timeline_semaphore.c\n            ../vortek_support/arrays.c\n            ../vortek_support/ring_buffer.c\n            ../vortek_support/sysvshared_memory.c)"
+replacement = "            src/timeline_semaphore.c\n            ../vortek_support/arrays.c\n            ../vortek_support/ring_buffer.c\n            ../vortek_support/sysvshared_memory.c\n            ../vortek_support/ahardware_buffer_compat.c)"
 if needle not in s:
     raise SystemExit("Unexpected upstream Vortek CMake layout")
 p.write_text(s.replace(needle, replacement))
