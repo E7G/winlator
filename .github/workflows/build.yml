@@ -74,10 +74,52 @@ jobs:
           path: build.log
           if-no-files-found: warn
 
-      - name: Upload APK Artifact
+      - name: Split APK for reliable download
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -type f | head -n 1)"
+          test -n "$APK"
+          mkdir -p apk-parts
+          split -b 190M -d -a 2 "$APK" apk-parts/winlator.apk.part-
+          sha256sum "$APK" > apk-parts/APK-SHA256.txt
+          sha256sum apk-parts/winlator.apk.part-* > apk-parts/PARTS-SHA256.txt
+          ls -lh apk-parts
+
+      - name: Upload APK metadata
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Bionic-Vortek-Build-${{ github.run_number }}
-          path: app/build/outputs/apk/release/*.apk
+          name: Bionic-Vortek-Metadata-${{ github.run_number }}
+          path: |
+            apk-parts/APK-SHA256.txt
+            apk-parts/PARTS-SHA256.txt
+          if-no-files-found: error
+
+      - name: Upload APK part 00
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bionic-Vortek-Part00-${{ github.run_number }}
+          path: apk-parts/winlator.apk.part-00
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload APK part 01
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bionic-Vortek-Part01-${{ github.run_number }}
+          path: apk-parts/winlator.apk.part-01
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload APK part 02
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bionic-Vortek-Part02-${{ github.run_number }}
+          path: apk-parts/winlator.apk.part-02
+          compression-level: 0
           if-no-files-found: error
